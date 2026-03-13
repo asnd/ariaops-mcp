@@ -1,9 +1,11 @@
 """MCP server setup and tool registration."""
 
 import json
+from typing import cast
 
 import mcp.types as types
 from mcp.server import Server
+from pydantic import AnyUrl
 
 from ariaops_mcp.tools import alerts, capacity, discovery, metrics, reports, resources
 
@@ -41,13 +43,13 @@ def create_server() -> Server:
     async def list_resources() -> list[types.Resource]:
         return [
             types.Resource(
-                uri="ariaops://version",
+                uri=cast(AnyUrl, "ariaops://version"),
                 name="Aria Operations Version",
                 description="Current Aria Operations version and deployment info",
                 mimeType="application/json",
             ),
             types.Resource(
-                uri="ariaops://adapter-kinds",
+                uri=cast(AnyUrl, "ariaops://adapter-kinds"),
                 name="Aria Operations Adapter Kinds",
                 description="All adapter kinds registered in Aria Operations",
                 mimeType="application/json",
@@ -55,7 +57,7 @@ def create_server() -> Server:
         ]
 
     @server.read_resource()
-    async def read_resource(uri: types.AnyUrl) -> str:
+    async def read_resource(uri: AnyUrl) -> str:
         from ariaops_mcp.client import get_client
 
         uri_str = str(uri)
