@@ -100,6 +100,8 @@ Add to your MCP config (e.g. `~/.claude/mcp_settings.json` for AI code assistant
 | Reports    | `list_report_definitions`, `get_report_definition`, `list_reports`, `get_report`, `download_report`, `list_report_schedules` |
 | Discovery  | `get_version`, `list_collectors`, `list_symptoms`, `list_recommendations`, `list_supermetrics` |
 
+Full tool catalog: [`TOOLS.md`](TOOLS.md)
+
 Full spec: [`REQUIREMENTS.md`](REQUIREMENTS.md)
 
 ## Development
