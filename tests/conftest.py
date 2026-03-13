@@ -3,12 +3,14 @@
 import pytest
 
 from ariaops_mcp import client as client_module
+from ariaops_mcp.config import get_settings
 
 
 @pytest.fixture(autouse=True)
 def reset_client():
-    """Reset the module-level singleton before each test."""
+    """Reset the module-level client singleton and settings cache before each test."""
     client_module._client = None
+    get_settings.cache_clear()
     yield
     client_module._client = None
 

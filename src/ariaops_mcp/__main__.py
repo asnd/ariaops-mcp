@@ -3,16 +3,17 @@
 import asyncio
 import logging
 
-from ariaops_mcp.config import settings
+from ariaops_mcp.config import get_settings
 from ariaops_mcp.server import create_server
 
 
 def main() -> None:
-    logging.basicConfig(level=settings.log_level)
+    s = get_settings()
+    logging.basicConfig(level=s.log_level)
 
     server = create_server()
 
-    if settings.transport == "http":
+    if s.transport == "http":
         import uvicorn
         from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
@@ -28,8 +29,8 @@ def main() -> None:
                 config = uvicorn.Config(
                     session_manager.handle_request,
                     host="0.0.0.0",
-                    port=settings.port,
-                    log_level=settings.log_level.lower(),
+                    port=s.port,
+                    log_level=s.log_level.lower(),
                 )
                 uvicorn_server = uvicorn.Server(config)
                 await uvicorn_server.serve()

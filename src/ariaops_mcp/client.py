@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from ariaops_mcp.config import settings
+from ariaops_mcp.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,8 @@ class AriaOpsClient:
     async def _get_http(self) -> httpx.AsyncClient:
         if self._http is None:
             self._http = httpx.AsyncClient(
-                base_url=settings.base_url,
-                verify=settings.verify_ssl,
+                base_url=get_settings().base_url,
+                verify=get_settings().verify_ssl,
                 timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
                 headers={"Content-Type": "application/json", "Accept": "application/json"},
             )
@@ -41,9 +41,9 @@ class AriaOpsClient:
         resp = await http.post(
             "/auth/token/acquire",
             json={
-                "username": settings.username,
-                "password": settings.password,
-                "authSource": settings.auth_source,
+                "username": get_settings().username,
+                "password": get_settings().password,
+                "authSource": get_settings().auth_source,
             },
         )
         resp.raise_for_status()

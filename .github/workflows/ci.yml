@@ -42,6 +42,10 @@ jobs:
 
       - name: Run tests
         run: pytest --tb=short -v
+        env:
+          ARIAOPS_HOST: vrops.test.local
+          ARIAOPS_USERNAME: testuser
+          ARIAOPS_PASSWORD: testpass
 
   typecheck:
     name: Type Check
