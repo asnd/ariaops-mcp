@@ -1,6 +1,6 @@
 # AriaOps MCP Server
 
-A **read-only** [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for VMware Aria Operations (on-prem). Exposes Aria Ops REST API capabilities as MCP tools so AI assistants like Claude can query infrastructure health, alerts, metrics, capacity, and reports.
+A **read-only** [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for VMware Aria Operations (on-prem). Exposes Aria Ops REST API capabilities as MCP tools so AI assistants can query infrastructure health, alerts, metrics, capacity, and reports.
 
 ## Features
 
@@ -24,14 +24,14 @@ Supports both `stdio` (local/testing) and `streamable HTTP` (production) transpo
 ### Install
 
 ```bash
-pip install ariaops-mcp
-```
-
-Or from source:
-
-```bash
 git clone https://github.com/asnd/ariaops-mcp.git
 cd ariaops-mcp
+pip install -e .
+```
+
+For development (includes linting and test tools):
+
+```bash
 pip install -e ".[dev]"
 ```
 
@@ -106,8 +106,8 @@ Full spec: [`REQUIREMENTS.md`](REQUIREMENTS.md)
 
 ```bash
 pip install -e ".[dev]"
-pytest
-ruff check .
+pytest                  # run tests
+ruff check src/ tests/  # lint
 ```
 
 ## Configuration Reference
