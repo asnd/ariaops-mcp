@@ -3,12 +3,15 @@
 import json
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import quote
 
+import httpx
 import mcp.types as types
 
 from ariaops_mcp.client import get_client
+from ariaops_mcp.tools._common import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, truncate_list_response
 
-_PAGE_SIZE_DEFAULT = 50
+VALID_RELATIONSHIP_TYPES = {"PARENT", "CHILD", "ALL"}
 
 
 def tool_definitions() -> list[types.Tool]:
@@ -22,8 +25,13 @@ def tool_definitions() -> list[types.Tool]:
                     "resourceKind": {"type": "string", "description": "Filter by resource kind, e.g. VirtualMachine"},
                     "adapterKind": {"type": "string", "description": "Filter by adapter kind, e.g. VMWARE"},
                     "name": {"type": "string", "description": "Filter by resource name (partial match)"},
-                    "page": {"type": "integer", "default": 0},
-                    "pageSize": {"type": "integer", "default": _PAGE_SIZE_DEFAULT},
+                    "page": {"type": "integer", "default": 0, "minimum": 0},
+                    "pageSize": {
+                        "type": "integer",
+                        "default": PAGE_SIZE_DEFAULT,
+                        "minimum": 1,
+                        "maximum": PAGE_SIZE_MAX,
+                    },
                 },
             },
         ),
@@ -45,8 +53,13 @@ def tool_definitions() -> list[types.Tool]:
                     "adapterKind": {"type": "string"},
                     "resourceKind": {"type": "string"},
                     "name": {"type": "string"},
-                    "page": {"type": "integer", "default": 0},
-                    "pageSize": {"type": "integer", "default": _PAGE_SIZE_DEFAULT},
+                    "page": {"type": "integer", "default": 0, "minimum": 0},
+                    "pageSize": {
+                        "type": "integer",
+                        "default": PAGE_SIZE_DEFAULT,
+                        "minimum": 1,
+                        "maximum": PAGE_SIZE_MAX,
+                    },
                 },
             },
         ),
@@ -91,8 +104,13 @@ def tool_definitions() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "page": {"type": "integer", "default": 0},
-                    "pageSize": {"type": "integer", "default": _PAGE_SIZE_DEFAULT},
+                    "page": {"type": "integer", "default": 0, "minimum": 0},
+                    "pageSize": {
+                        "type": "integer",
+                        "default": PAGE_SIZE_DEFAULT,
+                        "minimum": 1,
+                        "maximum": PAGE_SIZE_MAX,
+                    },
                 },
             },
         ),
@@ -110,68 +128,154 @@ def tool_definitions() -> list[types.Tool]:
 
 def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
     async def list_resources(args: dict) -> str:
-        client = get_client()
-        data = await client.get(
-            "/resources",
-            resourceKind=args.get("resourceKind"),
-            adapterKind=args.get("adapterKind"),
-            name=args.get("name"),
-            page=args.get("page", 0),
-            pageSize=args.get("pageSize", _PAGE_SIZE_DEFAULT),
-        )
-        return json.dumps(data, indent=2)
+        try:
+            page = max(0, int(args.get("page", 0)))
+            page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
+            data = await get_client().get(
+                "/resources",
+                resourceKind=args.get("resourceKind"),
+                adapterKind=args.get("adapterKind"),
+                name=args.get("name"),
+                page=page,
+                pageSize=page_size,
+            )
+            data = truncate_list_response(data, "resourceList")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def get_resource(args: dict) -> str:
-        data = await get_client().get(f"/resources/{args['id']}")
-        return json.dumps(data, indent=2)
+        if not args.get("id"):
+            return json.dumps({"error": "Missing required argument: id"})
+        try:
+            data = await get_client().get(f"/resources/{quote(args['id'], safe='')}")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def query_resources(args: dict) -> str:
-        body: dict[str, Any] = {}
-        if args.get("adapterKind"):
-            body["adapterKind"] = [args["adapterKind"]]
-        if args.get("resourceKind"):
-            body["resourceKind"] = [args["resourceKind"]]
-        if args.get("name"):
-            body["name"] = [args["name"]]
-        data = await get_client().post(
-            "/resources/query",
-            body,
-            page=args.get("page", 0),
-            pageSize=args.get("pageSize", _PAGE_SIZE_DEFAULT),
-        )
-        return json.dumps(data, indent=2)
+        try:
+            page = max(0, int(args.get("page", 0)))
+            page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
+            body: dict[str, Any] = {}
+            if args.get("adapterKind"):
+                body["adapterKind"] = [args["adapterKind"]]
+            if args.get("resourceKind"):
+                body["resourceKind"] = [args["resourceKind"]]
+            if args.get("name"):
+                body["name"] = [args["name"]]
+            data = await get_client().post(
+                "/resources/query",
+                body,
+                page=page,
+                pageSize=page_size,
+            )
+            data = truncate_list_response(data, "resourceList")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def get_resource_properties(args: dict) -> str:
-        data = await get_client().get(f"/resources/{args['id']}/properties")
-        return json.dumps(data, indent=2)
+        if not args.get("id"):
+            return json.dumps({"error": "Missing required argument: id"})
+        try:
+            data = await get_client().get(f"/resources/{quote(args['id'], safe='')}/properties")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def get_resource_relationships(args: dict) -> str:
+        if not args.get("id"):
+            return json.dumps({"error": "Missing required argument: id"})
         rel = args.get("relationshipType", "ALL").upper()
-        if rel == "ALL":
-            data = await get_client().get(f"/resources/{args['id']}/relationships")
-        else:
-            data = await get_client().get(f"/resources/{args['id']}/relationships/{rel}")
-        return json.dumps(data, indent=2)
+        if rel not in VALID_RELATIONSHIP_TYPES:
+            return json.dumps(
+                {"error": f"Invalid relationshipType: {rel}. Must be one of {sorted(VALID_RELATIONSHIP_TYPES)}"}
+            )
+        try:
+            rid = quote(args["id"], safe="")
+            if rel == "ALL":
+                data = await get_client().get(f"/resources/{rid}/relationships")
+            else:
+                data = await get_client().get(f"/resources/{rid}/relationships/{rel}")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def list_adapter_kinds(args: dict) -> str:
-        data = await get_client().get("/adapterkinds")
-        return json.dumps(data, indent=2)
+        try:
+            data = await get_client().get("/adapterkinds")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def list_resource_kinds(args: dict) -> str:
-        data = await get_client().get(f"/adapterkinds/{args['adapterKindKey']}/resourcekinds")
-        return json.dumps(data, indent=2)
+        if not args.get("adapterKindKey"):
+            return json.dumps({"error": "Missing required argument: adapterKindKey"})
+        try:
+            data = await get_client().get(f"/adapterkinds/{quote(args['adapterKindKey'], safe='')}/resourcekinds")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def list_resource_groups(args: dict) -> str:
-        data = await get_client().get(
-            "/resources/groups",
-            page=args.get("page", 0),
-            pageSize=args.get("pageSize", _PAGE_SIZE_DEFAULT),
-        )
-        return json.dumps(data, indent=2)
+        try:
+            page = max(0, int(args.get("page", 0)))
+            page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
+            data = await get_client().get(
+                "/resources/groups",
+                page=page,
+                pageSize=page_size,
+            )
+            data = truncate_list_response(data, "resourceGroups")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def get_resource_group_members(args: dict) -> str:
-        data = await get_client().get(f"/resources/groups/{args['groupId']}/members")
-        return json.dumps(data, indent=2)
+        if not args.get("groupId"):
+            return json.dumps({"error": "Missing required argument: groupId"})
+        try:
+            data = await get_client().get(f"/resources/groups/{quote(args['groupId'], safe='')}/members")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     return {
         "list_resources": list_resources,

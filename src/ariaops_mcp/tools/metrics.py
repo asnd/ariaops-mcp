@@ -3,10 +3,15 @@
 import json
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import quote
 
+import httpx
 import mcp.types as types
 
 from ariaops_mcp.client import get_client
+
+VALID_ROLL_UP_TYPES = {"AVG", "MIN", "MAX", "SUM", "NONE"}
+VALID_INTERVAL_TYPES = {"MINUTES", "HOURS", "DAYS", "WEEKS", "MONTHS"}
 
 
 def tool_definitions() -> list[types.Tool]:
@@ -111,68 +116,155 @@ def tool_definitions() -> list[types.Tool]:
 
 def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
     async def get_resource_stats(args: dict) -> str:
-        data = await get_client().get(
-            f"/resources/{args['id']}/stats",
-            statKey=args.get("statKey"),
-            begin=args.get("begin"),
-            end=args.get("end"),
-            rollUpType=args.get("rollUpType", "AVG"),
-            intervalType=args.get("intervalType", "HOURS"),
-            intervalQuantifier=args.get("intervalQuantifier", 1),
-        )
-        return json.dumps(data, indent=2)
+        if not args.get("id"):
+            return json.dumps({"error": "Missing required argument: id"})
+        roll_up_type = args.get("rollUpType", "AVG")
+        if roll_up_type and roll_up_type not in VALID_ROLL_UP_TYPES:
+            return json.dumps(
+                {"error": f"Invalid rollUpType: {roll_up_type}. Must be one of {sorted(VALID_ROLL_UP_TYPES)}"}
+            )
+        interval_type = args.get("intervalType", "HOURS")
+        if interval_type and interval_type not in VALID_INTERVAL_TYPES:
+            return json.dumps(
+                {"error": f"Invalid intervalType: {interval_type}. Must be one of {sorted(VALID_INTERVAL_TYPES)}"}
+            )
+        try:
+            data = await get_client().get(
+                f"/resources/{quote(args['id'], safe='')}/stats",
+                statKey=args.get("statKey"),
+                begin=args.get("begin"),
+                end=args.get("end"),
+                rollUpType=roll_up_type,
+                intervalType=interval_type,
+                intervalQuantifier=args.get("intervalQuantifier", 1),
+            )
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def get_latest_stats(args: dict) -> str:
-        data = await get_client().get(
-            f"/resources/{args['id']}/stats/latest",
-            statKey=args.get("statKey"),
-        )
-        return json.dumps(data, indent=2)
+        if not args.get("id"):
+            return json.dumps({"error": "Missing required argument: id"})
+        try:
+            data = await get_client().get(
+                f"/resources/{quote(args['id'], safe='')}/stats/latest",
+                statKey=args.get("statKey"),
+            )
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def query_stats(args: dict) -> str:
-        body: dict[str, Any] = {
-            "resourceId": [{"resourceId": rid} for rid in args["resourceIds"]],
-            "statKey": [{"key": k} for k in args["statKeys"]],
-        }
-        if args.get("begin"):
-            body["begin"] = args["begin"]
-        if args.get("end"):
-            body["end"] = args["end"]
-        if args.get("rollUpType"):
-            body["rollUpType"] = args["rollUpType"]
-        if args.get("intervalType"):
-            body["intervalType"] = args["intervalType"]
-        data = await get_client().post("/resources/stats/query", body)
-        return json.dumps(data, indent=2)
+        if not args.get("resourceIds"):
+            return json.dumps({"error": "Missing required argument: resourceIds"})
+        if not args.get("statKeys"):
+            return json.dumps({"error": "Missing required argument: statKeys"})
+        roll_up_type = args.get("rollUpType")
+        if roll_up_type and roll_up_type not in VALID_ROLL_UP_TYPES:
+            return json.dumps(
+                {"error": f"Invalid rollUpType: {roll_up_type}. Must be one of {sorted(VALID_ROLL_UP_TYPES)}"}
+            )
+        interval_type = args.get("intervalType")
+        if interval_type and interval_type not in VALID_INTERVAL_TYPES:
+            return json.dumps(
+                {"error": f"Invalid intervalType: {interval_type}. Must be one of {sorted(VALID_INTERVAL_TYPES)}"}
+            )
+        try:
+            body: dict[str, Any] = {
+                "resourceId": [{"resourceId": rid} for rid in args["resourceIds"]],
+                "statKey": [{"key": k} for k in args["statKeys"]],
+            }
+            if args.get("begin"):
+                body["begin"] = args["begin"]
+            if args.get("end"):
+                body["end"] = args["end"]
+            if roll_up_type:
+                body["rollUpType"] = roll_up_type
+            if interval_type:
+                body["intervalType"] = interval_type
+            data = await get_client().post("/resources/stats/query", body)
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def query_latest_stats(args: dict) -> str:
-        body = {
-            "resourceId": [{"resourceId": rid} for rid in args["resourceIds"]],
-            "statKey": [{"key": k} for k in args["statKeys"]],
-        }
-        data = await get_client().post("/resources/stats/latest/query", body)
-        return json.dumps(data, indent=2)
+        if not args.get("resourceIds"):
+            return json.dumps({"error": "Missing required argument: resourceIds"})
+        if not args.get("statKeys"):
+            return json.dumps({"error": "Missing required argument: statKeys"})
+        try:
+            body = {
+                "resourceId": [{"resourceId": rid} for rid in args["resourceIds"]],
+                "statKey": [{"key": k} for k in args["statKeys"]],
+            }
+            data = await get_client().post("/resources/stats/latest/query", body)
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def get_stat_keys(args: dict) -> str:
-        data = await get_client().get(f"/resources/{args['id']}/statkeys")
-        return json.dumps(data, indent=2)
+        if not args.get("id"):
+            return json.dumps({"error": "Missing required argument: id"})
+        try:
+            data = await get_client().get(f"/resources/{quote(args['id'], safe='')}/statkeys")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def get_top_n_stats(args: dict) -> str:
-        data = await get_client().get(
-            f"/resources/{args['id']}/stats/topn",
-            statKey=args.get("statKey"),
-            topN=args.get("topN", 5),
-        )
-        return json.dumps(data, indent=2)
+        if not args.get("id"):
+            return json.dumps({"error": "Missing required argument: id"})
+        try:
+            data = await get_client().get(
+                f"/resources/{quote(args['id'], safe='')}/stats/topn",
+                statKey=args.get("statKey"),
+                topN=args.get("topN", 5),
+            )
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def list_properties_latest(args: dict) -> str:
-        body: dict[str, Any] = {
-            "resourceId": [{"resourceId": rid} for rid in args["resourceIds"]],
-        }
-        if args.get("propertyKeys"):
-            body["propertyKey"] = [{"key": k} for k in args["propertyKeys"]]
-        data = await get_client().post("/resources/properties/latest/query", body)
-        return json.dumps(data, indent=2)
+        if not args.get("resourceIds"):
+            return json.dumps({"error": "Missing required argument: resourceIds"})
+        try:
+            body: dict[str, Any] = {
+                "resourceId": [{"resourceId": rid} for rid in args["resourceIds"]],
+            }
+            if args.get("propertyKeys"):
+                body["propertyKey"] = [{"key": k} for k in args["propertyKeys"]]
+            data = await get_client().post("/resources/properties/latest/query", body)
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     return {
         "get_resource_stats": get_resource_stats,

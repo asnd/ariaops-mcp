@@ -39,3 +39,17 @@ async def test_list_collectors(handlers):
         result = await handlers["list_collectors"]({})
         data = json.loads(result)
         assert data["collector"][0]["id"] == "col-001"
+
+
+@pytest.mark.asyncio
+async def test_get_version_http_status_error(handlers):
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/versions/current").mock(
+            return_value=httpx.Response(503, json={"message": "Service unavailable"})
+        )
+
+        result = await handlers["get_version"]({})
+        data = json.loads(result)
+        assert "error" in data
+        assert data["status_code"] == 503

@@ -59,3 +59,25 @@ async def test_get_capacity_overview_no_resources(handlers):
 
         assert data["message"] == "No resources found"
         assert data["resourceKind"] == "ClusterComputeResource"
+
+
+@pytest.mark.asyncio
+async def test_get_capacity_remaining_missing_id(handlers):
+    result = await handlers["get_capacity_remaining"]({})
+    data = json.loads(result)
+    assert "error" in data
+    assert "id" in data["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_capacity_overview_http_status_error(handlers):
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/resources").mock(
+            return_value=httpx.Response(503, json={"message": "Service unavailable"})
+        )
+
+        result = await handlers["get_capacity_overview"]({})
+        data = json.loads(result)
+        assert "error" in data
+        assert data["status_code"] == 503

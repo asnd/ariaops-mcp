@@ -58,8 +58,9 @@ class AriaOpsClient:
             )
             data = resp.json()
             self._token = data["token"]
-            # validity is in ms since epoch
-            self._token_expiry = data.get("validity", 0) / 1000.0
+            # validity is in ms since epoch; fall back to 1-hour TTL if missing
+            validity_ms = data.get("validity")
+            self._token_expiry = validity_ms / 1000.0 if validity_ms else time.time() + 3600
             logger.debug("Token acquired, expires at %s", self._token_expiry)
 
     async def _request_with_retry(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
@@ -171,8 +172,8 @@ class AriaOpsClient:
                     headers={"Authorization": f"vRealizeOpsToken {self._token}"},
                 )
                 logger.debug("Token released")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to release token: %s", e)
         if self._http:
             await self._http.aclose()
             self._http = None

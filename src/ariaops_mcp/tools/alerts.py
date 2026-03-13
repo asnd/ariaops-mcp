@@ -3,12 +3,16 @@
 import json
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import quote
 
+import httpx
 import mcp.types as types
 
 from ariaops_mcp.client import get_client
+from ariaops_mcp.tools._common import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, truncate_list_response
 
-_PAGE_SIZE_DEFAULT = 50
+VALID_STATUS = {"ACTIVE", "CANCELLED", "SUSPENDED"}
+VALID_CRITICALITY = {"CRITICAL", "IMMEDIATE", "WARNING", "INFORMATION"}
 
 
 def tool_definitions() -> list[types.Tool]:
@@ -30,8 +34,13 @@ def tool_definitions() -> list[types.Tool]:
                         "description": "Alert criticality",
                     },
                     "resourceId": {"type": "string", "description": "Filter by resource UUID"},
-                    "page": {"type": "integer", "default": 0},
-                    "pageSize": {"type": "integer", "default": _PAGE_SIZE_DEFAULT},
+                    "page": {"type": "integer", "default": 0, "minimum": 0},
+                    "pageSize": {
+                        "type": "integer",
+                        "default": PAGE_SIZE_DEFAULT,
+                        "minimum": 1,
+                        "maximum": PAGE_SIZE_MAX,
+                    },
                 },
             },
         ),
@@ -53,8 +62,13 @@ def tool_definitions() -> list[types.Tool]:
                     "resourceIds": {"type": "array", "items": {"type": "string"}},
                     "alertCriticality": {"type": "array", "items": {"type": "string"}},
                     "alertStatus": {"type": "array", "items": {"type": "string"}},
-                    "page": {"type": "integer", "default": 0},
-                    "pageSize": {"type": "integer", "default": _PAGE_SIZE_DEFAULT},
+                    "page": {"type": "integer", "default": 0, "minimum": 0},
+                    "pageSize": {
+                        "type": "integer",
+                        "default": PAGE_SIZE_DEFAULT,
+                        "minimum": 1,
+                        "maximum": PAGE_SIZE_MAX,
+                    },
                 },
             },
         ),
@@ -73,8 +87,13 @@ def tool_definitions() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "page": {"type": "integer", "default": 0},
-                    "pageSize": {"type": "integer", "default": _PAGE_SIZE_DEFAULT},
+                    "page": {"type": "integer", "default": 0, "minimum": 0},
+                    "pageSize": {
+                        "type": "integer",
+                        "default": PAGE_SIZE_DEFAULT,
+                        "minimum": 1,
+                        "maximum": PAGE_SIZE_MAX,
+                    },
                 },
             },
         ),
@@ -97,55 +116,127 @@ def tool_definitions() -> list[types.Tool]:
 
 def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
     async def list_alerts(args: dict) -> str:
-        data = await get_client().get(
-            "/alerts",
-            status=args.get("status"),
-            criticality=args.get("criticality"),
-            resourceId=args.get("resourceId"),
-            page=args.get("page", 0),
-            pageSize=args.get("pageSize", _PAGE_SIZE_DEFAULT),
-        )
-        return json.dumps(data, indent=2)
+        status = args.get("status")
+        if status and status not in VALID_STATUS:
+            return json.dumps({"error": f"Invalid status: {status}. Must be one of {sorted(VALID_STATUS)}"})
+        criticality = args.get("criticality")
+        if criticality and criticality not in VALID_CRITICALITY:
+            return json.dumps(
+                {"error": f"Invalid criticality: {criticality}. Must be one of {sorted(VALID_CRITICALITY)}"}
+            )
+        try:
+            page = max(0, int(args.get("page", 0)))
+            page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
+            data = await get_client().get(
+                "/alerts",
+                status=status,
+                criticality=criticality,
+                resourceId=args.get("resourceId"),
+                page=page,
+                pageSize=page_size,
+            )
+            data = truncate_list_response(data, "alerts")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def get_alert(args: dict) -> str:
-        data = await get_client().get(f"/alerts/{args['id']}")
-        return json.dumps(data, indent=2)
+        if not args.get("id"):
+            return json.dumps({"error": "Missing required argument: id"})
+        try:
+            data = await get_client().get(f"/alerts/{quote(args['id'], safe='')}")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def query_alerts(args: dict) -> str:
-        body: dict[str, Any] = {}
-        if args.get("resourceIds"):
-            body["resourceIds"] = args["resourceIds"]
-        if args.get("alertCriticality"):
-            body["alertCriticality"] = args["alertCriticality"]
-        if args.get("alertStatus"):
-            body["alertStatus"] = args["alertStatus"]
-        data = await get_client().post(
-            "/alerts/query",
-            body,
-            page=args.get("page", 0),
-            pageSize=args.get("pageSize", _PAGE_SIZE_DEFAULT),
-        )
-        return json.dumps(data, indent=2)
+        try:
+            page = max(0, int(args.get("page", 0)))
+            page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
+            body: dict[str, Any] = {}
+            if args.get("resourceIds"):
+                body["resourceIds"] = args["resourceIds"]
+            if args.get("alertCriticality"):
+                body["alertCriticality"] = args["alertCriticality"]
+            if args.get("alertStatus"):
+                body["alertStatus"] = args["alertStatus"]
+            data = await get_client().post(
+                "/alerts/query",
+                body,
+                page=page,
+                pageSize=page_size,
+            )
+            data = truncate_list_response(data, "alerts")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def get_alert_notes(args: dict) -> str:
-        data = await get_client().get(f"/alerts/{args['id']}/notes")
-        return json.dumps(data, indent=2)
+        if not args.get("id"):
+            return json.dumps({"error": "Missing required argument: id"})
+        try:
+            data = await get_client().get(f"/alerts/{quote(args['id'], safe='')}/notes")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def list_alert_definitions(args: dict) -> str:
-        data = await get_client().get(
-            "/alertdefinitions",
-            page=args.get("page", 0),
-            pageSize=args.get("pageSize", _PAGE_SIZE_DEFAULT),
-        )
-        return json.dumps(data, indent=2)
+        try:
+            page = max(0, int(args.get("page", 0)))
+            page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
+            data = await get_client().get(
+                "/alertdefinitions",
+                page=page,
+                pageSize=page_size,
+            )
+            data = truncate_list_response(data, "alertDefinitions")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def get_alert_definition(args: dict) -> str:
-        data = await get_client().get(f"/alertdefinitions/{args['id']}")
-        return json.dumps(data, indent=2)
+        if not args.get("id"):
+            return json.dumps({"error": "Missing required argument: id"})
+        try:
+            data = await get_client().get(f"/alertdefinitions/{quote(args['id'], safe='')}")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def get_contributing_symptoms(args: dict) -> str:
-        data = await get_client().get("/alerts/contributingsymptoms")
-        return json.dumps(data, indent=2)
+        try:
+            data = await get_client().get("/alerts/contributingsymptoms")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     return {
         "list_alerts": list_alerts,

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import signal
 
 from ariaops_mcp.config import get_settings
 from ariaops_mcp.server import create_server
@@ -27,7 +28,13 @@ def main() -> None:
 
         async def app(scope, receive, send):
             if scope["type"] == "http" and scope.get("method") == "GET" and scope.get("path") == "/health":
-                body = json.dumps({"status": "ok"}).encode("utf-8")
+                try:
+                    from ariaops_mcp.client import get_client
+
+                    await get_client().get("/versions/current")
+                    body = json.dumps({"status": "ok"}).encode()
+                except Exception as e:
+                    body = json.dumps({"status": "degraded", "detail": str(e)}).encode()
                 await send(
                     {
                         "type": "http.response.start",
@@ -41,6 +48,16 @@ def main() -> None:
             await session_manager.handle_request(scope, receive, send)
 
         async def run_http() -> None:
+            from ariaops_mcp.client import get_client
+
+            loop = asyncio.get_event_loop()
+
+            async def shutdown() -> None:
+                await get_client().close()
+
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
+
             async with session_manager.run():
                 config = uvicorn.Config(
                     app,
@@ -56,12 +73,17 @@ def main() -> None:
         from mcp.server.stdio import stdio_server
 
         async def run_stdio() -> None:
-            async with stdio_server() as (read_stream, write_stream):
-                await server.run(
-                    read_stream,
-                    write_stream,
-                    server.create_initialization_options(),
-                )
+            from ariaops_mcp.client import get_client
+
+            try:
+                async with stdio_server() as (read_stream, write_stream):
+                    await server.run(
+                        read_stream,
+                        write_stream,
+                        server.create_initialization_options(),
+                    )
+            finally:
+                await get_client().close()
 
         asyncio.run(run_stdio())
 

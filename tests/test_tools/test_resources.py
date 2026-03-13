@@ -60,3 +60,25 @@ async def test_list_adapter_kinds(handlers):
         result = await handlers["list_adapter_kinds"]({})
         data = json.loads(result)
         assert data["adapterKindList"][0]["key"] == "VMWARE"
+
+
+@pytest.mark.asyncio
+async def test_get_resource_missing_id(handlers):
+    result = await handlers["get_resource"]({})
+    data = json.loads(result)
+    assert "error" in data
+    assert "id" in data["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_resource_http_status_error(handlers):
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/resources/missing-vm").mock(
+            return_value=httpx.Response(404, json={"message": "Not found"})
+        )
+
+        result = await handlers["get_resource"]({"id": "missing-vm"})
+        data = json.loads(result)
+        assert "error" in data
+        assert data["status_code"] == 404

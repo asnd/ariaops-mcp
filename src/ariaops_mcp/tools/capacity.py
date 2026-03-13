@@ -4,6 +4,7 @@ import json
 import logging
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import mcp.types as types
@@ -69,12 +70,15 @@ def tool_definitions() -> list[types.Tool]:
 
 def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
     async def get_capacity_remaining(args: dict) -> str:
+        if not args.get("id"):
+            return json.dumps({"error": "Missing required argument: id"})
         client = get_client()
         results: dict[str, Any] = {"resourceId": args["id"], "capacityStats": {}}
+        rid = quote(args["id"], safe="")
         for stat_key in CAPACITY_STAT_KEYS:
             try:
                 data = await client.get(
-                    f"/resources/{args['id']}/stats/latest",
+                    f"/resources/{rid}/stats/latest",
                     statKey=stat_key,
                 )
                 stat_list = data.get("values", [])
@@ -90,40 +94,54 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         return json.dumps(results, indent=2)
 
     async def get_capacity_overview(args: dict) -> str:
-        client = get_client()
-        adapter_kind = args.get("adapterKind", "VMWARE")
-        resource_kind = args.get("resourceKind", "ClusterComputeResource")
-        page_size = args.get("pageSize", 20)
+        try:
+            client = get_client()
+            adapter_kind = args.get("adapterKind", "VMWARE")
+            resource_kind = args.get("resourceKind", "ClusterComputeResource")
+            page_size = args.get("pageSize", 20)
 
-        resources_data = await client.get(
-            "/resources",
-            adapterKind=adapter_kind,
-            resourceKind=resource_kind,
-            pageSize=page_size,
-        )
+            resources_data = await client.get(
+                "/resources",
+                adapterKind=adapter_kind,
+                resourceKind=resource_kind,
+                pageSize=page_size,
+            )
 
-        resource_ids = [r["identifier"] for r in resources_data.get("resourceList", [])]
-        if not resource_ids:
-            return json.dumps({"message": "No resources found", "resourceKind": resource_kind})
+            resource_ids = [r["identifier"] for r in resources_data.get("resourceList", [])]
+            if not resource_ids:
+                return json.dumps({"message": "No resources found", "resourceKind": resource_kind})
 
-        body = {
-            "resourceId": [{"resourceId": rid} for rid in resource_ids],
-            "statKey": [{"key": k} for k in CAPACITY_STAT_KEYS],
-        }
-        stats_data = await client.post("/resources/stats/latest/query", body)
+            body = {
+                "resourceId": [{"resourceId": rid} for rid in resource_ids],
+                "statKey": [{"key": k} for k in CAPACITY_STAT_KEYS],
+            }
+            stats_data = await client.post("/resources/stats/latest/query", body)
 
-        return json.dumps(
-            {
-                "resourceKind": resource_kind,
-                "resourceCount": len(resource_ids),
-                "capacityStats": stats_data,
-            },
-            indent=2,
-        )
+            return json.dumps(
+                {
+                    "resourceKind": resource_kind,
+                    "resourceCount": len(resource_ids),
+                    "capacityStats": stats_data,
+                },
+                indent=2,
+            )
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def list_policies(args: dict) -> str:
-        data = await get_client().get("/policies")
-        return json.dumps(data, indent=2)
+        try:
+            data = await get_client().get("/policies")
+            return json.dumps(data, indent=2)
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
+        except httpx.HTTPError as e:
+            return json.dumps({"error": "Network error", "detail": str(e)})
+        except Exception as e:
+            return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     return {
         "get_capacity_remaining": get_capacity_remaining,

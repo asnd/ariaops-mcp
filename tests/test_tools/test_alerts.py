@@ -63,3 +63,25 @@ async def test_list_alert_definitions(handlers):
         result = await handlers["list_alert_definitions"]({})
         data = json.loads(result)
         assert data["alertDefinitions"][0]["name"] == "CPU Contention"
+
+
+@pytest.mark.asyncio
+async def test_get_alert_missing_id(handlers):
+    result = await handlers["get_alert"]({})
+    data = json.loads(result)
+    assert "error" in data
+    assert "id" in data["error"]
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_http_status_error(handlers):
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/alerts").mock(
+            return_value=httpx.Response(503, json={"message": "Service unavailable"})
+        )
+
+        result = await handlers["list_alerts"]({})
+        data = json.loads(result)
+        assert "error" in data
+        assert data["status_code"] == 503
