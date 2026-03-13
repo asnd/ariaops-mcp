@@ -146,7 +146,7 @@ Expose key reference data as MCP resources (read-only context the LLM can pull):
 
 ```
 ┌──────────────────────────────────────────────┐
-│  MCP Client (Claude Code / AI App)           │
+│  MCP Client (AI code assistant / App)        │
 │                                              │
 │  stdio (local)  ──or──  HTTP (production)    │
 └──────────┬───────────────────────┬───────────┘
@@ -213,7 +213,7 @@ ariaops_mcp/
 │   │   ├── test_metrics.py
 │   │   └── ...
 │   └── fixtures/               # Sample API response JSON
-└── CLAUDE.md                   # Claude Code project instructions
+└── CLAUDE.md                   # AI code assistant project instructions
 ```
 
 ---

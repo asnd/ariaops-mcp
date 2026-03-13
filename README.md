@@ -50,7 +50,7 @@ ARIAOPS_AUTH_SOURCE=local     # or your LDAP source name
 ARIAOPS_VERIFY_SSL=true
 ```
 
-### Run (stdio — for Claude Code / MCP clients)
+### Run (stdio — for MCP clients)
 
 ```bash
 python -m ariaops_mcp
@@ -69,9 +69,9 @@ podman build --format docker -t ariaops-mcp .
 podman run --env-file .env -p 8080:8080 ariaops-mcp
 ```
 
-## Claude Code Integration
+## MCP Client Integration
 
-Add to your MCP config (`~/.claude/mcp_settings.json`):
+Add to your MCP config (e.g. `~/.claude/mcp_settings.json` for AI code assistants):
 
 ```json
 {
