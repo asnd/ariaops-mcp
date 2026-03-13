@@ -1,6 +1,7 @@
 """Entry point for ariaops-mcp."""
 
 import asyncio
+import json
 import logging
 
 from ariaops_mcp.config import get_settings
@@ -24,10 +25,25 @@ def main() -> None:
             stateless=True,
         )
 
+        async def app(scope, receive, send):
+            if scope["type"] == "http" and scope.get("method") == "GET" and scope.get("path") == "/health":
+                body = json.dumps({"status": "ok"}).encode("utf-8")
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": [(b"content-type", b"application/json")],
+                    }
+                )
+                await send({"type": "http.response.body", "body": body})
+                return
+
+            await session_manager.handle_request(scope, receive, send)
+
         async def run_http() -> None:
             async with session_manager.run():
                 config = uvicorn.Config(
-                    session_manager.handle_request,
+                    app,
                     host="0.0.0.0",
                     port=s.port,
                     log_level=s.log_level.lower(),

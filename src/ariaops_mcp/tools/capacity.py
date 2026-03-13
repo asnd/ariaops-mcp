@@ -1,12 +1,16 @@
 """Capacity tools for Aria Operations (composite via stat keys)."""
 
 import json
+import logging
 from collections.abc import Callable
 from typing import Any
 
+import httpx
 import mcp.types as types
 
 from ariaops_mcp.client import get_client
+
+logger = logging.getLogger(__name__)
 
 # Capacity-related stat keys in Aria Operations
 CAPACITY_STAT_KEYS = [
@@ -76,8 +80,13 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 stat_list = data.get("values", [])
                 if stat_list:
                     results["capacityStats"][stat_key] = stat_list[0].get("data", [])
-            except Exception:
-                pass
+            except httpx.HTTPError as exc:
+                logger.warning(
+                    "Failed to fetch capacity stat '%s' for resource '%s': %s",
+                    stat_key,
+                    args["id"],
+                    exc,
+                )
         return json.dumps(results, indent=2)
 
     async def get_capacity_overview(args: dict) -> str:

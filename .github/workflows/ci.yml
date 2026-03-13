@@ -41,7 +41,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests
-        run: pytest --tb=short -v
+        run: pytest -ra --tb=short -v --maxfail=1 --durations=10
         env:
           ARIAOPS_HOST: vrops.test.local
           ARIAOPS_USERNAME: testuser

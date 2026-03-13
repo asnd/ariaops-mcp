@@ -8,6 +8,14 @@ from ariaops_mcp.tools import alerts, capacity, discovery, metrics, reports, res
 
 def create_server() -> Server:
     server = Server("ariaops-mcp")
+    handlers = {
+        **resources.tool_handlers(),
+        **alerts.tool_handlers(),
+        **metrics.tool_handlers(),
+        **capacity.tool_handlers(),
+        **reports.tool_handlers(),
+        **discovery.tool_handlers(),
+    }
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
@@ -21,19 +29,11 @@ def create_server() -> Server:
         )
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
-        handlers = {
-            **resources.tool_handlers(),
-            **alerts.tool_handlers(),
-            **metrics.tool_handlers(),
-            **capacity.tool_handlers(),
-            **reports.tool_handlers(),
-            **discovery.tool_handlers(),
-        }
+    async def call_tool(name: str, arguments: dict | None) -> list[types.TextContent]:
         handler = handlers.get(name)
         if not handler:
             raise ValueError(f"Unknown tool: {name}")
-        result = await handler(arguments)
+        result = await handler(arguments or {})
         return [types.TextContent(type="text", text=result)]
 
     return server
