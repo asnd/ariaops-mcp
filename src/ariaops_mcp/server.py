@@ -36,8 +36,17 @@ def _build_registry() -> tuple[list[types.Tool], dict]:
     return defs, handlers
 
 
+def _build_tool_defs_by_name(tool_defs: list[types.Tool]) -> dict[str, types.Tool]:
+    by_name: dict[str, types.Tool] = {}
+    for tool in tool_defs:
+        if tool.name in by_name:
+            raise ValueError(f"Duplicate tool definition: {tool.name}")
+        by_name[tool.name] = tool
+    return by_name
+
+
 _TOOL_DEFS, _TOOL_HANDLERS = _build_registry()
-_TOOL_DEFS_BY_NAME = {tool.name: tool for tool in _TOOL_DEFS}
+_TOOL_DEFS_BY_NAME = _build_tool_defs_by_name(_TOOL_DEFS)
 
 
 def create_server() -> Server:
@@ -52,6 +61,10 @@ def create_server() -> Server:
         handler = _TOOL_HANDLERS.get(name)
         if not handler:
             raise ValueError(f"Unknown tool: {name}")
+        tool = _TOOL_DEFS_BY_NAME.get(name)
+        if not tool:
+            raise ValueError(f"Tool metadata not found: {name}")
+
         if arguments is not None and not isinstance(arguments, dict):
             return [
                 types.TextContent(
@@ -66,22 +79,20 @@ def create_server() -> Server:
             ]
 
         parsed_args = arguments or {}
-        tool = _TOOL_DEFS_BY_NAME.get(name)
-        if tool:
-            missing_required = _missing_required_arguments(tool, parsed_args)
-            if missing_required:
-                return [
-                    types.TextContent(
-                        type="text",
-                        text=json.dumps(
-                            {
-                                "error": f"Missing required argument(s): {', '.join(missing_required)}",
-                                "missing": missing_required,
-                                "next_step": "Ask the user for the missing value(s) and retry this tool call.",
-                            }
-                        ),
-                    )
-                ]
+        missing_required = _missing_required_arguments(tool, parsed_args)
+        if missing_required:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": f"Missing required argument(s): {', '.join(missing_required)}",
+                            "missing": missing_required,
+                            "next_step": "Ask the user for the missing value(s) and retry this tool call.",
+                        }
+                    ),
+                )
+            ]
 
         result = await handler(parsed_args)
         return [types.TextContent(type="text", text=result)]
