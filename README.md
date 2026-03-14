@@ -12,6 +12,7 @@ A **read-only** [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 
 - **Discovery** — version info, collectors, symptom definitions, recommendations
 
 Supports both `stdio` (local/testing) and `streamable HTTP` (production) transports.
+This makes it usable from cloud-hosted and on-prem model runtimes, including locally running MCP-capable setups (for example Ollama- or LM Studio-based workflows).
 
 ## Requirements
 
