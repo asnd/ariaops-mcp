@@ -13,6 +13,30 @@ A **read-only** [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 
 
 Supports both `stdio` (local/testing) and `streamable HTTP` (production) transports.
 
+## MCP Architecture
+
+```
+MCP Client (Claude Desktop, IDE agent, or app)
+  └── MCP transport: stdio (local) or streamable HTTP (production)
+      └── ariaops_mcp server
+          ├── Transport layer (__main__.py)
+          ├── MCP server + registry (server.py)
+          ├── Tool handlers (tools/*.py)
+          └── AriaOpsClient (client.py)
+               └── VMware Aria Operations REST API
+```
+
+### Components and roles
+
+| Component | Role |
+|---|---|
+| MCP client | Sends tool calls and reads MCP resources/context. |
+| Transport layer (`src/ariaops_mcp/__main__.py`) | Starts the server in `stdio` mode for local MCP clients or HTTP mode for remote/production use. |
+| MCP server (`src/ariaops_mcp/server.py`) | Registers all tools/resources and routes incoming MCP calls to the matching handler. |
+| Tool modules (`src/ariaops_mcp/tools/*.py`) | Implement domain-specific operations (resources, alerts, metrics, capacity, reports, discovery). |
+| API client (`src/ariaops_mcp/client.py`) | Authenticates with Aria Operations, manages token lifecycle, performs API requests, and retries transient failures. |
+| Aria Operations API | Upstream system of record for infrastructure inventory, health, alerts, metrics, and reports. |
+
 ## Requirements
 
 - Python 3.11+
