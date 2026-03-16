@@ -11,7 +11,7 @@ import asyncio
 import json
 import os
 import sys
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from getpass import getpass
 from typing import Any, Protocol, TextIO
@@ -35,7 +35,13 @@ class MCPSession(Protocol):
     ) -> Any: ...
 
 
-SessionFactory = Callable[[dict[str, str]], Awaitable[Any]]
+class MCPTextContent(Protocol):
+    type: str
+    text: str
+
+
+class MCPCallResult(Protocol):
+    content: Sequence[MCPTextContent]
 
 
 def resolve_runtime_env(
@@ -68,7 +74,7 @@ def resolve_runtime_env(
     return values
 
 
-def _text_payload(call_result: Any) -> str:
+def _text_payload(call_result: MCPCallResult | Any) -> str:
     for item in getattr(call_result, "content", []):
         if getattr(item, "type", "") == "text":
             return str(getattr(item, "text", ""))

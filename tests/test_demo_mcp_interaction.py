@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
@@ -16,7 +17,10 @@ def test_resolve_runtime_env_prompts_for_missing_values():
 
     def fake_input(prompt: str) -> str:
         prompts.append(prompt)
-        return {"Enter ARIAOPS_HOST: ": "vrops.example.local", "Enter ARIAOPS_USERNAME: ": "admin"}[prompt]
+        responses = {"Enter ARIAOPS_HOST: ": "vrops.example.local", "Enter ARIAOPS_USERNAME: ": "admin"}
+        if prompt not in responses:
+            raise AssertionError(f"Unexpected prompt: {prompt}")
+        return responses[prompt]
 
     def fake_secret_input(prompt: str) -> str:
         prompts.append(prompt)
@@ -53,15 +57,21 @@ async def test_run_demo_initializes_and_calls_vcenter_inventory():
             return SimpleNamespace()
 
         async def list_tools(self, cursor=None, *, params=None):
-            return SimpleNamespace(tools=[SimpleNamespace(name="list_resources"), SimpleNamespace(name="get_version")])
+            return SimpleNamespace(
+                tools=[
+                    SimpleNamespace(name="list_resources"),
+                    SimpleNamespace(name="get_version"),
+                ]
+            )
 
         async def list_resources(self, cursor=None, *, params=None):
             return SimpleNamespace(resources=[SimpleNamespace(uri="ariaops://version")])
 
         async def call_tool(self, name, arguments=None, read_timeout_seconds=None, **kwargs):
             call_log.append((name, arguments or {}))
+            payload = {"resourceList": [{"name": "vcsa-01"}, {"name": "vcsa-02"}]}
             return SimpleNamespace(
-                content=[SimpleNamespace(type="text", text='{"resourceList":[{"name":"vcsa-01"},{"name":"vcsa-02"}]}')]
+                content=[SimpleNamespace(type="text", text=json.dumps(payload))]
             )
 
     @asynccontextmanager
