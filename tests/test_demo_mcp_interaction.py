@@ -12,7 +12,12 @@ import pytest
 from ariaops_mcp.demo_mcp_interaction import VCENTER_QUERY, resolve_runtime_env, run_demo
 
 
-def test_resolve_runtime_env_prompts_for_missing_values():
+def test_resolve_runtime_env_prompts_for_missing_values(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ARIAOPS_HOST", raising=False)
+    monkeypatch.delenv("ARIAOPS_USERNAME", raising=False)
+    monkeypatch.delenv("ARIAOPS_PASSWORD", raising=False)
+
     prompts: list[str] = []
 
     def fake_input(prompt: str) -> str:
@@ -40,7 +45,11 @@ def test_resolve_runtime_env_prompts_for_missing_values():
     assert prompts == ["Enter ARIAOPS_HOST: ", "Enter ARIAOPS_USERNAME: ", "Enter ARIAOPS_PASSWORD: "]
 
 
-def test_resolve_runtime_env_non_interactive_missing_values_raises():
+def test_resolve_runtime_env_non_interactive_missing_values_raises(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ARIAOPS_HOST", raising=False)
+    monkeypatch.delenv("ARIAOPS_USERNAME", raising=False)
+
     with pytest.raises(
         RuntimeError,
         match="Missing required environment variable\\(s\\): ARIAOPS_HOST, ARIAOPS_USERNAME",
