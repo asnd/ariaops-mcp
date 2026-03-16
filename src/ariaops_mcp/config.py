@@ -1,10 +1,19 @@
-"""Configuration loaded from environment variables."""
+"""Configuration loaded from settings.ini and environment variables."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
+from dotenv import dotenv_values
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+SETTINGS_FILE = Path("settings.ini")
+
+
+def load_settings_ini(path: str | Path = SETTINGS_FILE) -> dict[str, str]:
+    values = dotenv_values(path)
+    return {key: value for key, value in values.items() if key and value}
 
 
 class Settings(BaseSettings):
@@ -12,12 +21,12 @@ class Settings(BaseSettings):
     username: str = Field(..., alias="ARIAOPS_USERNAME")
     password: str = Field(..., alias="ARIAOPS_PASSWORD")
     auth_source: str = Field("local", alias="ARIAOPS_AUTH_SOURCE")
-    verify_ssl: bool = Field(True, alias="ARIAOPS_VERIFY_SSL")
+    verify_ssl: bool = Field(False, alias="ARIAOPS_VERIFY_SSL")
     transport: Literal["stdio", "http"] = Field("stdio", alias="ARIAOPS_TRANSPORT")
-    port: int = Field(8080, alias="ARIAOPS_PORT")
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field("INFO", alias="ARIAOPS_LOG_LEVEL")
+    port: int = Field(443, alias="ARIAOPS_PORT")
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field("DEBUG", alias="ARIAOPS_LOG_LEVEL")
 
-    model_config = {"populate_by_name": True}
+    model_config = SettingsConfigDict(populate_by_name=True, env_file="settings.ini", env_file_encoding="utf-8")
 
     @field_validator("transport", mode="before")
     @classmethod

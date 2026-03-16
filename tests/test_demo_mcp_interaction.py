@@ -48,6 +48,27 @@ def test_resolve_runtime_env_non_interactive_missing_values_raises():
         resolve_runtime_env({"ARIAOPS_PASSWORD": "x"}, stdin_isatty=False)
 
 
+def test_resolve_runtime_env_reads_settings_ini_and_all_defaults(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "settings.ini").write_text(
+        "ARIAOPS_HOST=vrops.example.local\n"
+        "ARIAOPS_USERNAME=admin\n"
+        "ARIAOPS_PASSWORD=secret\n",
+        encoding="utf-8",
+    )
+
+    env = resolve_runtime_env({}, stdin_isatty=False)
+
+    assert env["ARIAOPS_HOST"] == "vrops.example.local"
+    assert env["ARIAOPS_USERNAME"] == "admin"
+    assert env["ARIAOPS_PASSWORD"] == "secret"
+    assert env["ARIAOPS_AUTH_SOURCE"] == "local"
+    assert env["ARIAOPS_VERIFY_SSL"] == "false"
+    assert env["ARIAOPS_TRANSPORT"] == "stdio"
+    assert env["ARIAOPS_PORT"] == "443"
+    assert env["ARIAOPS_LOG_LEVEL"] == "DEBUG"
+
+
 @pytest.mark.asyncio
 async def test_run_demo_initializes_and_calls_vcenter_inventory():
     call_log: list[tuple[str, dict]] = []

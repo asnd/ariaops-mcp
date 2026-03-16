@@ -62,17 +62,17 @@ pip install -e ".[dev]"
 
 ### Configure
 
-```bash
-cp .env.example .env
-# Edit .env with your Aria Ops credentials
-```
+Create a `settings.ini` file in the working directory (the demo script and server load this automatically):
 
 ```env
 ARIAOPS_HOST=vrops.example.com
 ARIAOPS_USERNAME=admin
 ARIAOPS_PASSWORD=secret
 ARIAOPS_AUTH_SOURCE=local     # or your LDAP source name
-ARIAOPS_VERIFY_SSL=true
+ARIAOPS_VERIFY_SSL=false
+ARIAOPS_TRANSPORT=stdio
+ARIAOPS_PORT=443
+ARIAOPS_LOG_LEVEL=DEBUG
 ```
 
 ### Run (stdio — for MCP clients)
@@ -99,7 +99,7 @@ ARIAOPS_TRANSPORT=http ARIAOPS_PORT=8080 python -m ariaops_mcp
 
 ```bash
 podman build --format docker -t ariaops-mcp .
-podman run --env-file .env -p 8080:8080 ariaops-mcp
+podman run -v "$(pwd)/settings.ini:/app/settings.ini:ro" -p 8080:8080 ariaops-mcp
 ```
 
 ## MCP Client Integration
@@ -153,10 +153,10 @@ ruff check src/ tests/  # lint
 | `ARIAOPS_USERNAME` | Yes | — | API username |
 | `ARIAOPS_PASSWORD` | Yes | — | API password |
 | `ARIAOPS_AUTH_SOURCE` | No | `local` | Auth source (local / LDAP name) |
-| `ARIAOPS_VERIFY_SSL` | No | `true` | TLS certificate verification |
+| `ARIAOPS_VERIFY_SSL` | No | `false` | TLS certificate verification |
 | `ARIAOPS_TRANSPORT` | No | `stdio` | `stdio` or `http` |
-| `ARIAOPS_PORT` | No | `8080` | HTTP listen port |
-| `ARIAOPS_LOG_LEVEL` | No | `INFO` | Log level |
+| `ARIAOPS_PORT` | No | `443` | HTTP listen port |
+| `ARIAOPS_LOG_LEVEL` | No | `DEBUG` | Log level |
 
 ## License
 
