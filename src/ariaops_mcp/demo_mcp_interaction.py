@@ -60,6 +60,13 @@ def resolve_runtime_env(
     secret_input_fn: Callable[[str], str] = getpass,
     stdin_isatty: bool | None = None,
 ) -> dict[str, str]:
+    """Resolve runtime configuration for the demo script.
+
+    Precedence order is:
+    1) values loaded from settings.ini
+    2) values from process environment (or provided env mapping)
+    3) interactive prompts for any still-missing required values
+    """
     values = load_settings_ini()
     values.update(os.environ if env is None else env)
     missing = [key for key in REQUIRED_ENV_VARS if not values.get(key, "").strip()]

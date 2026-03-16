@@ -12,6 +12,11 @@ SETTINGS_FILE = Path("settings.ini")
 
 
 def load_settings_ini(path: str | Path = SETTINGS_FILE) -> dict[str, str]:
+    """Load key/value pairs from settings.ini if present.
+
+    Missing files intentionally resolve to an empty mapping so callers can
+    continue with environment variables and runtime prompts.
+    """
     values = dotenv_values(path)
     return {key: value for key, value in values.items() if key and value}
 

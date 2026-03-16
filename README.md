@@ -155,7 +155,7 @@ ruff check src/ tests/  # lint
 | `ARIAOPS_AUTH_SOURCE` | No | `local` | Auth source (local / LDAP name) |
 | `ARIAOPS_VERIFY_SSL` | No | `false` | TLS certificate verification |
 | `ARIAOPS_TRANSPORT` | No | `stdio` | `stdio` or `http` |
-| `ARIAOPS_PORT` | No | `443` | HTTP listen port |
+| `ARIAOPS_PORT` | No | `443` | MCP HTTP listen port (used when `ARIAOPS_TRANSPORT=http`) |
 | `ARIAOPS_LOG_LEVEL` | No | `DEBUG` | Log level |
 
 ## License
