@@ -81,6 +81,14 @@ ARIAOPS_VERIFY_SSL=true
 python -m ariaops_mcp
 ```
 
+### MCP interaction demo (no LLM)
+
+Run the built-in demo script to initialize MCP, discover tools/resources, and query vCenter inventory:
+
+```bash
+python -m ariaops_mcp.demo_mcp_interaction
+```
+
 ### Run (HTTP — production)
 
 ```bash
