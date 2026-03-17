@@ -19,6 +19,7 @@ RUN useradd --system --no-create-home --uid 1001 mcpuser
 WORKDIR /app
 COPY --from=builder /build/dist/*.whl .
 RUN pip install --no-cache-dir *.whl && rm *.whl
+# Optional runtime config: mount a settings.ini file at /app/settings.ini.
 
 USER mcpuser
 

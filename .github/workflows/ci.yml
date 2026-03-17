@@ -47,13 +47,18 @@ jobs:
         run: pip install -e ".[dev]" pytest-cov
         continue-on-error: false
 
+      - name: Create settings.ini
+        run: |
+          cat > settings.ini <<'EOF'
+          ARIAOPS_HOST=vrops.test.local
+          ARIAOPS_USERNAME=testuser
+          ARIAOPS_PASSWORD=testpass
+          EOF
+        continue-on-error: false
+
       - name: Run tests
         run: pytest -ra --tb=short -v --maxfail=1 --durations=10 --cov=src/ariaops_mcp --cov-report=term-missing
         continue-on-error: false
-        env:
-          ARIAOPS_HOST: vrops.test.local
-          ARIAOPS_USERNAME: testuser
-          ARIAOPS_PASSWORD: testpass
 
   typecheck:
     name: Type Check

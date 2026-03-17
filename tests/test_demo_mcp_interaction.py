@@ -12,7 +12,12 @@ import pytest
 from ariaops_mcp.demo_mcp_interaction import VCENTER_QUERY, resolve_runtime_env, run_demo
 
 
-def test_resolve_runtime_env_prompts_for_missing_values():
+def test_resolve_runtime_env_prompts_for_missing_values(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ARIAOPS_HOST", raising=False)
+    monkeypatch.delenv("ARIAOPS_USERNAME", raising=False)
+    monkeypatch.delenv("ARIAOPS_PASSWORD", raising=False)
+
     prompts: list[str] = []
 
     def fake_input(prompt: str) -> str:
@@ -40,12 +45,37 @@ def test_resolve_runtime_env_prompts_for_missing_values():
     assert prompts == ["Enter ARIAOPS_HOST: ", "Enter ARIAOPS_USERNAME: ", "Enter ARIAOPS_PASSWORD: "]
 
 
-def test_resolve_runtime_env_non_interactive_missing_values_raises():
+def test_resolve_runtime_env_non_interactive_missing_values_raises(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ARIAOPS_HOST", raising=False)
+    monkeypatch.delenv("ARIAOPS_USERNAME", raising=False)
+
     with pytest.raises(
         RuntimeError,
         match="Missing required environment variable\\(s\\): ARIAOPS_HOST, ARIAOPS_USERNAME",
     ):
         resolve_runtime_env({"ARIAOPS_PASSWORD": "x"}, stdin_isatty=False)
+
+
+def test_resolve_runtime_env_reads_settings_ini_and_all_defaults(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "settings.ini").write_text(
+        "ARIAOPS_HOST=vrops.example.local\n"
+        "ARIAOPS_USERNAME=admin\n"
+        "ARIAOPS_PASSWORD=secret\n",
+        encoding="utf-8",
+    )
+
+    env = resolve_runtime_env({}, stdin_isatty=False)
+
+    assert env["ARIAOPS_HOST"] == "vrops.example.local"
+    assert env["ARIAOPS_USERNAME"] == "admin"
+    assert env["ARIAOPS_PASSWORD"] == "secret"
+    assert env["ARIAOPS_AUTH_SOURCE"] == "local"
+    assert env["ARIAOPS_VERIFY_SSL"] == "false"
+    assert env["ARIAOPS_TRANSPORT"] == "stdio"
+    assert env["ARIAOPS_PORT"] == "443"
+    assert env["ARIAOPS_LOG_LEVEL"] == "DEBUG"
 
 
 @pytest.mark.asyncio

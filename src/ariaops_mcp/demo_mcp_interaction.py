@@ -19,7 +19,16 @@ from typing import Any, Protocol, TextIO
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
+from ariaops_mcp.config import load_settings_ini
+
 REQUIRED_ENV_VARS = ("ARIAOPS_HOST", "ARIAOPS_USERNAME", "ARIAOPS_PASSWORD")
+DEFAULT_ENV_VARS = {
+    "ARIAOPS_AUTH_SOURCE": "local",
+    "ARIAOPS_VERIFY_SSL": "false",
+    "ARIAOPS_TRANSPORT": "stdio",
+    "ARIAOPS_PORT": "443",
+    "ARIAOPS_LOG_LEVEL": "DEBUG",
+}
 VCENTER_QUERY = {"adapterKind": "VMWARE", "resourceKind": "VirtualCenter", "page": 0, "pageSize": 200}
 
 
@@ -51,7 +60,15 @@ def resolve_runtime_env(
     secret_input_fn: Callable[[str], str] = getpass,
     stdin_isatty: bool | None = None,
 ) -> dict[str, str]:
-    values = dict(os.environ if env is None else env)
+    """Resolve runtime configuration for the demo script.
+
+    Precedence order is:
+    1) values loaded from settings.ini
+    2) values from process environment (or provided env mapping)
+    3) interactive prompts for any still-missing required values
+    """
+    values = load_settings_ini()
+    values.update(os.environ if env is None else env)
     missing = [key for key in REQUIRED_ENV_VARS if not values.get(key, "").strip()]
     if missing:
         interactive = sys.stdin.isatty() if stdin_isatty is None else stdin_isatty
@@ -70,7 +87,8 @@ def resolve_runtime_env(
                 raise RuntimeError(f"{key} is required and cannot be empty.")
             values[key] = entered
 
-    values.setdefault("ARIAOPS_TRANSPORT", "stdio")
+    for key, default in DEFAULT_ENV_VARS.items():
+        values.setdefault(key, default)
     return values
 
 
