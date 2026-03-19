@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar, Token
 import logging
 import time
 from typing import Any
@@ -26,13 +27,26 @@ class AriaOpsClient:
         self._http: httpx.AsyncClient | None = None
         self._token_lock = asyncio.Lock()
 
+    def _should_bypass_proxy(self) -> bool:
+        """Return True if the vROps host should bypass any configured proxy."""
+        import os
+
+        cfg = get_settings()
+        # check ARIAOPS_NO_PROXY setting first, then fall back to system no_proxy/NO_PROXY
+        no_proxy_val = cfg.no_proxy or os.environ.get("no_proxy") or os.environ.get("NO_PROXY") or ""
+        return any(entry.strip() and cfg.host.endswith(entry.strip()) for entry in no_proxy_val.split(","))
+
     async def _get_http(self) -> httpx.AsyncClient:
         if self._http is None:
+            cfg = get_settings()
+            # if the target host is in no_proxy, disable proxy for all traffic
+            mounts = {"all://": None} if self._should_bypass_proxy() else {}
             self._http = httpx.AsyncClient(
-                base_url=get_settings().base_url,
-                verify=get_settings().verify_ssl,
+                base_url=cfg.base_url,
+                verify=cfg.verify_ssl,
                 timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
                 headers={"Content-Type": "application/json", "Accept": "application/json"},
+                mounts=mounts,
             )
         return self._http
 
@@ -181,9 +195,21 @@ class AriaOpsClient:
 
 # Module-level singleton
 _client: AriaOpsClient | None = None
+_client_override: ContextVar[AriaOpsClient | None] = ContextVar("ariaops_client_override", default=None)
+
+
+def set_client_override(client: AriaOpsClient) -> Token[AriaOpsClient | None]:
+    return _client_override.set(client)
+
+
+def reset_client_override(token: Token[AriaOpsClient | None]) -> None:
+    _client_override.reset(token)
 
 
 def get_client() -> AriaOpsClient:
+    override = _client_override.get()
+    if override is not None:
+        return override
     global _client
     if _client is None:
         _client = AriaOpsClient()

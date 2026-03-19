@@ -1,5 +1,6 @@
 """Configuration loaded from environment variables."""
 
+from contextvars import ContextVar, Token
 from functools import lru_cache
 from typing import Literal
 
@@ -12,10 +13,11 @@ class Settings(BaseSettings):
     username: str = Field(..., alias="ARIAOPS_USERNAME")
     password: str = Field(..., alias="ARIAOPS_PASSWORD")
     auth_source: str = Field("local", alias="ARIAOPS_AUTH_SOURCE")
-    verify_ssl: bool = Field(True, alias="ARIAOPS_VERIFY_SSL")
+    verify_ssl: bool = Field(False, alias="ARIAOPS_VERIFY_SSL")
     transport: Literal["stdio", "http"] = Field("stdio", alias="ARIAOPS_TRANSPORT")
     port: int = Field(8080, alias="ARIAOPS_PORT")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field("INFO", alias="ARIAOPS_LOG_LEVEL")
+    no_proxy: str | None = Field(None, alias="ARIAOPS_NO_PROXY")
 
     model_config = {"populate_by_name": True}
 
@@ -41,6 +43,20 @@ class Settings(BaseSettings):
         return f"https://{self.host}/suite-api/api"
 
 
+_settings_override: ContextVar[Settings | None] = ContextVar("ariaops_settings_override", default=None)
+
+
+def set_settings_override(settings: Settings) -> Token[Settings | None]:
+    return _settings_override.set(settings)
+
+
+def reset_settings_override(token: Token[Settings | None]) -> None:
+    _settings_override.reset(token)
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    override = _settings_override.get()
+    if override is not None:
+        return override
     return Settings()  # type: ignore[call-arg]
