@@ -170,7 +170,11 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 pageSize=page_size,
             )
             data = truncate_list_response(data, "resourceList", page=page, page_size=page_size)
-            data = apply_response_shaping(data, "resourceList", fields=args.get("fields"), summary_only=bool(args.get("summaryOnly", False)))
+            data = apply_response_shaping(
+                data, "resourceList",
+                fields=args.get("fields"),
+                summary_only=bool(args.get("summaryOnly", False)),
+            )
             return json.dumps(data, indent=2)
         except httpx.HTTPStatusError as e:
             return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
@@ -210,7 +214,11 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 pageSize=page_size,
             )
             data = truncate_list_response(data, "resourceList", page=page, page_size=page_size)
-            data = apply_response_shaping(data, "resourceList", fields=args.get("fields"), summary_only=bool(args.get("summaryOnly", False)))
+            data = apply_response_shaping(
+                data, "resourceList",
+                fields=args.get("fields"),
+                summary_only=bool(args.get("summaryOnly", False)),
+            )
             return json.dumps(data, indent=2)
         except httpx.HTTPStatusError as e:
             return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
@@ -288,7 +296,11 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 pageSize=page_size,
             )
             data = truncate_list_response(data, "resourceGroups", page=page, page_size=page_size)
-            data = apply_response_shaping(data, "resourceGroups", fields=args.get("fields"), summary_only=bool(args.get("summaryOnly", False)))
+            data = apply_response_shaping(
+                data, "resourceGroups",
+                fields=args.get("fields"),
+                summary_only=bool(args.get("summaryOnly", False)),
+            )
             return json.dumps(data, indent=2)
         except httpx.HTTPStatusError as e:
             return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})

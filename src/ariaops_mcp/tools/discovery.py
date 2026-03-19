@@ -109,7 +109,11 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 pageSize=page_size,
             )
             data = truncate_list_response(data, "symptomDefinitions", page=page, page_size=page_size)
-            data = apply_response_shaping(data, "symptomDefinitions", fields=args.get("fields"), summary_only=bool(args.get("summaryOnly", False)))
+            data = apply_response_shaping(
+                data, "symptomDefinitions",
+                fields=args.get("fields"),
+                summary_only=bool(args.get("summaryOnly", False)),
+            )
             return json.dumps(data, indent=2)
         except httpx.HTTPStatusError as e:
             return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
@@ -122,7 +126,11 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         try:
             data = await get_client().get("/recommendations")
             data = truncate_list_response(data, "recommendations", page=0)
-            data = apply_response_shaping(data, "recommendations", fields=args.get("fields"), summary_only=bool(args.get("summaryOnly", False)))
+            data = apply_response_shaping(
+                data, "recommendations",
+                fields=args.get("fields"),
+                summary_only=bool(args.get("summaryOnly", False)),
+            )
             return json.dumps(data, indent=2)
         except httpx.HTTPStatusError as e:
             return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
