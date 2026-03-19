@@ -8,7 +8,7 @@ import httpx
 import mcp.types as types
 
 from ariaops_mcp.client import get_client
-from ariaops_mcp.tools._common import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, truncate_list_response
+from ariaops_mcp.tools._common import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, apply_response_shaping, truncate_list_response
 
 
 def tool_definitions() -> list[types.Tool]:
@@ -36,13 +36,37 @@ def tool_definitions() -> list[types.Tool]:
                         "minimum": 1,
                         "maximum": PAGE_SIZE_MAX,
                     },
+                    "fields": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Return only these top-level fields per item to reduce payload size.",
+                    },
+                    "summaryOnly": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "When true, return only key identifying fields per item (compact mode).",
+                    },
                 },
             },
         ),
         types.Tool(
             name="list_recommendations",
             description="List recommendations defined in Aria Operations.",
-            inputSchema={"type": "object", "properties": {}},
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "fields": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Return only these top-level fields per item to reduce payload size.",
+                    },
+                    "summaryOnly": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "When true, return only key identifying fields per item (compact mode).",
+                    },
+                },
+            },
         ),
         types.Tool(
             name="list_supermetrics",
@@ -84,7 +108,12 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 page=page,
                 pageSize=page_size,
             )
-            data = truncate_list_response(data, "symptomDefinitions")
+            data = truncate_list_response(data, "symptomDefinitions", page=page, page_size=page_size)
+            data = apply_response_shaping(
+                data, "symptomDefinitions",
+                fields=args.get("fields"),
+                summary_only=bool(args.get("summaryOnly", False)),
+            )
             return json.dumps(data, indent=2)
         except httpx.HTTPStatusError as e:
             return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
@@ -96,7 +125,12 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
     async def list_recommendations(args: dict) -> str:
         try:
             data = await get_client().get("/recommendations")
-            data = truncate_list_response(data, "recommendations")
+            data = truncate_list_response(data, "recommendations", page=0, page_size=PAGE_SIZE_DEFAULT)
+            data = apply_response_shaping(
+                data, "recommendations",
+                fields=args.get("fields"),
+                summary_only=bool(args.get("summaryOnly", False)),
+            )
             return json.dumps(data, indent=2)
         except httpx.HTTPStatusError as e:
             return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
