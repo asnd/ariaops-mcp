@@ -125,7 +125,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
     async def list_recommendations(args: dict) -> str:
         try:
             data = await get_client().get("/recommendations")
-            data = truncate_list_response(data, "recommendations", page=0)
+            data = truncate_list_response(data, "recommendations", page=0, page_size=PAGE_SIZE_DEFAULT)
             data = apply_response_shaping(
                 data, "recommendations",
                 fields=args.get("fields"),
