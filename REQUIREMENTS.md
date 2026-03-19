@@ -261,8 +261,8 @@ All via environment variables (12-factor):
 | NFR-6  | Structured JSON logging when running in HTTP mode |
 | NFR-7  | Containerfile uses multi-stage build, runs as non-root |
 | NFR-8  | Health endpoint at `/health` in HTTP mode (returns Aria Ops connectivity status) |
-| NFR-9  | Pagination: tools that return lists must support `page`/`pageSize` params and return total count |
-| NFR-10 | Large responses truncated to avoid exceeding MCP message limits (configurable max, default 50 items) |
+| NFR-9  | Pagination: paginated list/query tools support `page`/`pageSize` params (`page` default `0`, `pageSize` default `50`, max `200`; `get_capacity_overview` default `pageSize=20`) and return total count when available |
+| NFR-10 | Large responses are truncated to avoid exceeding MCP message limits (default 50 items), with truncation metadata and pagination hints in the response |
 
 ---
 

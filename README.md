@@ -133,6 +133,15 @@ Add to your MCP config (e.g. `~/.claude/mcp_settings.json` for AI code assistant
 | Reports    | `list_report_definitions`, `get_report_definition`, `list_reports`, `get_report`, `download_report`, `list_report_schedules` |
 | Discovery  | `get_version`, `list_collectors`, `list_symptoms`, `list_recommendations`, `list_supermetrics` |
 
+### Pagination
+
+List/query tools support pagination parameters:
+- `page` (default: `0`)
+- `pageSize` (default: `50`, max: `200`; `get_capacity_overview` uses default `20`)
+
+Large list responses are truncated to 50 items to stay within MCP message limits.
+When truncation applies, responses include `_truncated`, `_truncatedAt`, and (when available from upstream `pageInfo`) `_totalCount`, `_nextPage`, and `_hint`.
+
 Full tool catalog: [`TOOLS.md`](TOOLS.md)
 
 Full spec: [`REQUIREMENTS.md`](REQUIREMENTS.md)
