@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import dotenv_values
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SETTINGS_FILE = Path("settings.ini")
@@ -59,3 +59,10 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]
+
+
+def write_operations_enabled() -> bool:
+    try:
+        return bool(get_settings().enable_write_operations)
+    except (ValidationError, ValueError):
+        return False

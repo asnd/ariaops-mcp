@@ -7,6 +7,7 @@ import mcp.types as types
 from mcp.server import Server
 from pydantic import AnyUrl
 
+from ariaops_mcp.config import write_operations_enabled
 from ariaops_mcp.tools import alerts, capacity, discovery, metrics, reports, resources
 from ariaops_mcp.tools import write_ops as write_operations_tools
 
@@ -29,15 +30,6 @@ def _missing_required_arguments(tool: types.Tool, arguments: dict) -> list[str]:
     return [key for key in required if _is_missing_required_argument(arguments.get(key))]
 
 
-def _write_operations_enabled() -> bool:
-    try:
-        from ariaops_mcp.config import get_settings
-
-        return bool(get_settings().enable_write_operations)
-    except Exception:
-        return False
-
-
 def _build_registry(include_write_operations: bool = False) -> tuple[list[types.Tool], dict]:
     defs: list[types.Tool] = []
     handlers: dict = {}
@@ -58,7 +50,7 @@ def _build_tool_defs_by_name(tool_defs: list[types.Tool]) -> dict[str, types.Too
 
 
 def create_server() -> Server:
-    tool_defs, tool_handlers = _build_registry(include_write_operations=_write_operations_enabled())
+    tool_defs, tool_handlers = _build_registry(include_write_operations=write_operations_enabled())
     tool_defs_by_name = _build_tool_defs_by_name(tool_defs)
     server = Server("ariaops-mcp")
 

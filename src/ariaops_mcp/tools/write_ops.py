@@ -9,17 +9,10 @@ import httpx
 import mcp.types as types
 
 from ariaops_mcp.client import get_client
-from ariaops_mcp.config import get_settings
+from ariaops_mcp.config import write_operations_enabled
 
 MAX_NOTE_LENGTH = 2000
 VALID_ALERT_ACTIONS = {"CANCEL", "SUSPEND"}
-
-
-def _write_ops_enabled() -> bool:
-    try:
-        return bool(get_settings().enable_write_operations)
-    except Exception:
-        return False
 
 
 def _disabled_response() -> str:
@@ -75,7 +68,7 @@ def tool_definitions() -> list[types.Tool]:
 
 def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
     async def add_alert_note(args: dict) -> str:
-        if not _write_ops_enabled():
+        if not write_operations_enabled():
             return _disabled_response()
 
         alert_id = str(args.get("id", "")).strip()
@@ -103,7 +96,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             return json.dumps({"error": "Unexpected error", "detail": str(e)})
 
     async def set_alert_status(args: dict) -> str:
-        if not _write_ops_enabled():
+        if not write_operations_enabled():
             return _disabled_response()
 
         alert_id = str(args.get("id", "")).strip()
