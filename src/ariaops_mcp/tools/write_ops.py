@@ -24,7 +24,7 @@ def _disabled_response() -> str:
     )
 
 
-def _contains_disallowed_control_chars(value: str) -> bool:
+def _has_disallowed_control_chars(value: str) -> bool:
     return any(ord(ch) < 32 and ch not in {"\n", "\r", "\t"} for ch in value)
 
 
@@ -79,7 +79,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             return json.dumps({"error": "Missing required argument: note"})
         if len(note) > MAX_NOTE_LENGTH:
             return json.dumps({"error": f"note exceeds maximum length of {MAX_NOTE_LENGTH} characters"})
-        if _contains_disallowed_control_chars(note):
+        if _has_disallowed_control_chars(note):
             return json.dumps({"error": "note contains disallowed control characters"})
 
         try:

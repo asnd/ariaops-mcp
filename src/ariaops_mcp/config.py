@@ -1,5 +1,6 @@
 """Configuration loaded from settings.ini and environment variables."""
 
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -9,6 +10,7 @@ from pydantic import Field, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SETTINGS_FILE = Path("settings.ini")
+logger = logging.getLogger(__name__)
 
 
 def load_settings_ini(path: str | Path = SETTINGS_FILE) -> dict[str, str]:
@@ -64,5 +66,6 @@ def get_settings() -> Settings:
 def write_operations_enabled() -> bool:
     try:
         return bool(get_settings().enable_write_operations)
-    except (ValidationError, ValueError):
+    except (ValidationError, ValueError) as exc:
+        logger.warning("Failed to resolve ARIAOPS_ENABLE_WRITE_OPERATIONS from settings: %s", exc)
         return False
