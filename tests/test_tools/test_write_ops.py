@@ -56,6 +56,7 @@ async def test_set_alert_status_when_enabled(mock_env, monkeypatch):
 @pytest.mark.asyncio
 async def test_add_alert_note_rejects_control_characters(handlers, monkeypatch):
     monkeypatch.setenv("ARIAOPS_ENABLE_WRITE_OPERATIONS", "true")
+    handlers = tool_handlers()
     result = await handlers["add_alert_note"]({"id": "alert-001", "note": "bad\x00note"})
     data = json.loads(result)
     assert "control characters" in data["error"]
@@ -64,6 +65,7 @@ async def test_add_alert_note_rejects_control_characters(handlers, monkeypatch):
 @pytest.mark.asyncio
 async def test_set_alert_status_rejects_invalid_action(handlers, monkeypatch):
     monkeypatch.setenv("ARIAOPS_ENABLE_WRITE_OPERATIONS", "true")
+    handlers = tool_handlers()
     result = await handlers["set_alert_status"]({"id": "alert-001", "action": "DELETE"})
     data = json.loads(result)
     assert "Invalid action" in data["error"]
