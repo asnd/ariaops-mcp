@@ -14,7 +14,7 @@ A **read-only** Model Context Protocol (MCP) server that exposes VMware Aria Ope
 | Constraint          | Value                                    |
 |---------------------|------------------------------------------|
 | Deployment          | On-prem only (no SaaS/Cloud support)    |
-| Access mode         | **Read-only** — no mutations             |
+| Access mode         | Read-only by default; optional gated writes |
 | Language            | Python 3.11+                             |
 | MCP SDK             | `mcp` (official Python SDK)              |
 | Transport           | `stdio` (testing/local) + `streamable HTTP` (production) |
@@ -49,7 +49,7 @@ Response: { "token": "...", "validity": 1234567890, "expiresAt": "..." }
 
 ## 4. MCP Tools — Functional Scope
 
-All tools are **read-only**. Organized by domain.
+Tools are read-only by default. Optional write tools are feature-flagged via `ARIAOPS_ENABLE_WRITE_OPERATIONS=true`.
 
 ### 4.1 Resources
 
@@ -246,6 +246,7 @@ All via environment variables (12-factor):
 | `ARIAOPS_PORT`        | No       | `8080`    | HTTP transport listen port         |
 | `ARIAOPS_TRANSPORT`   | No       | `stdio`   | `stdio` or `http`                  |
 | `ARIAOPS_LOG_LEVEL`   | No       | `INFO`    | Logging level                      |
+| `ARIAOPS_ENABLE_WRITE_OPERATIONS` | No | `false` | Enables write tools (alert note + status actions) |
 
 ---
 
@@ -268,7 +269,7 @@ All via environment variables (12-factor):
 
 ## 11. Out of Scope (v1)
 
-- Write operations (acknowledge alerts, create groups, modify policies)
+- Additional write operations beyond the feature-flagged alert note/status tools (for example group creation, policy mutation)
 - SaaS / VMware Cloud deployment
 - SSO / SAML authentication
 - WebSocket transport

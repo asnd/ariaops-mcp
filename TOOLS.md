@@ -1,6 +1,6 @@
 # Available MCP Tools
 
-This server exposes the following read-only MCP tools for VMware Aria Operations.
+This server exposes read-only MCP tools by default, plus optional write tools when `ARIAOPS_ENABLE_WRITE_OPERATIONS=true`.
 
 ## Resources (9 tools)
 
@@ -57,9 +57,15 @@ This server exposes the following read-only MCP tools for VMware Aria Operations
 - `list_recommendations` - List recommendations.
 - `list_supermetrics` - List super metrics.
 
+## Write Ops (2 tools, feature-flagged)
+
+- `add_alert_note` - Add a note/comment to an alert.
+- `set_alert_status` - Trigger alert status action (`CANCEL` or `SUSPEND`).
+
 ## Total
 
-- 37 read-only MCP tools
+- 37 read-only MCP tools (default)
+- +2 write tools when write operations are enabled
 
 ## Pagination & Truncation
 

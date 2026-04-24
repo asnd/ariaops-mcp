@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     transport: Literal["stdio", "http"] = Field("stdio", alias="ARIAOPS_TRANSPORT")
     port: int = Field(443, alias="ARIAOPS_PORT")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field("DEBUG", alias="ARIAOPS_LOG_LEVEL")
+    enable_write_operations: bool = Field(False, alias="ARIAOPS_ENABLE_WRITE_OPERATIONS")
 
     model_config = SettingsConfigDict(populate_by_name=True, env_file="settings.ini", env_file_encoding="utf-8")
 

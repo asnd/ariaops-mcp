@@ -1,6 +1,6 @@
 # AriaOps MCP Server
 
-A **read-only** [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for VMware Aria Operations (on-prem). Exposes Aria Ops REST API capabilities as MCP tools so AI assistants can query infrastructure health, alerts, metrics, capacity, and reports.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for VMware Aria Operations (on-prem). Exposes Aria Ops REST API capabilities as MCP tools so AI assistants can query infrastructure health, alerts, metrics, capacity, and reports. By default it runs in read-only mode, with optional write operations behind a feature flag.
 
 ## Features
 
@@ -10,6 +10,7 @@ A **read-only** [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 
 - **Capacity** — remaining capacity per cluster, time-to-full, policy thresholds
 - **Reports** — list templates, generated reports, download (PDF/CSV)
 - **Discovery** — version info, collectors, symptom definitions, recommendations
+- **Optional Write Ops (feature-flagged)** — add alert notes and set alert status actions
 
 Supports both `stdio` (local/testing) and `streamable HTTP` (production) transports.
 This makes it usable from cloud-hosted and on-prem model runtimes, including locally running MCP-capable setups (for example Ollama- or LM Studio-based workflows).
@@ -73,6 +74,7 @@ ARIAOPS_VERIFY_SSL=false
 ARIAOPS_TRANSPORT=stdio
 ARIAOPS_PORT=443
 ARIAOPS_LOG_LEVEL=DEBUG
+ARIAOPS_ENABLE_WRITE_OPERATIONS=false
 ```
 
 ### Run (stdio — for MCP clients)
@@ -132,6 +134,7 @@ Add to your MCP config (e.g. `~/.claude/mcp_settings.json` for AI code assistant
 | Capacity   | `get_capacity_remaining`, `get_capacity_overview`, `list_policies` |
 | Reports    | `list_report_definitions`, `get_report_definition`, `list_reports`, `get_report`, `download_report`, `list_report_schedules` |
 | Discovery  | `get_version`, `list_collectors`, `list_symptoms`, `list_recommendations`, `list_supermetrics` |
+| Write Ops *(when `ARIAOPS_ENABLE_WRITE_OPERATIONS=true`)* | `add_alert_note`, `set_alert_status` |
 
 ### Pagination
 
@@ -166,6 +169,7 @@ ruff check src/ tests/  # lint
 | `ARIAOPS_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `ARIAOPS_PORT` | No | `443` | MCP HTTP listen port (used when `ARIAOPS_TRANSPORT=http`) |
 | `ARIAOPS_LOG_LEVEL` | No | `DEBUG` | Log level |
+| `ARIAOPS_ENABLE_WRITE_OPERATIONS` | No | `false` | Enable gated write tools (`add_alert_note`, `set_alert_status`) |
 
 ## License
 
