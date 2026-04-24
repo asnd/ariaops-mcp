@@ -27,6 +27,7 @@ def test_loads_required_values_from_settings_ini(tmp_path, monkeypatch):
     assert settings.transport == "stdio"
     assert settings.port == 443
     assert settings.log_level == "DEBUG"
+    assert settings.enable_write_operations is False
 
 
 def test_reject_host_with_scheme(monkeypatch):
@@ -58,3 +59,13 @@ def test_transport_and_log_level_normalized(monkeypatch):
     settings = Settings()  # type: ignore[call-arg]
     assert settings.transport == "http"
     assert settings.log_level == "DEBUG"
+
+
+def test_enable_write_operations_from_env(monkeypatch):
+    monkeypatch.setenv("ARIAOPS_HOST", "vrops.test.local")
+    monkeypatch.setenv("ARIAOPS_USERNAME", "testuser")
+    monkeypatch.setenv("ARIAOPS_PASSWORD", "testpass")
+    monkeypatch.setenv("ARIAOPS_ENABLE_WRITE_OPERATIONS", "true")
+
+    settings = Settings()  # type: ignore[call-arg]
+    assert settings.enable_write_operations is True
