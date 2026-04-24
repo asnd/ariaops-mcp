@@ -67,5 +67,8 @@ def write_operations_enabled() -> bool:
     try:
         return bool(get_settings().enable_write_operations)
     except (ValidationError, ValueError) as exc:
-        logger.warning("Failed to resolve ARIAOPS_ENABLE_WRITE_OPERATIONS from settings: %s", exc)
+        logger.warning(
+            "Failed to resolve ARIAOPS_ENABLE_WRITE_OPERATIONS from settings, defaulting to disabled: %s",
+            exc,
+        )
         return False
