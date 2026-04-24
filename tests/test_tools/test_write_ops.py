@@ -75,7 +75,9 @@ async def test_add_alert_note_encodes_alert_id(mock_env, monkeypatch):
     handlers = tool_handlers()
     with respx.mock:
         respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
-        encoded = respx.post(f"{BASE}/alerts/alert%2F001/notes").mock(return_value=httpx.Response(200, json={"ok": True}))
+        encoded = respx.post(f"{BASE}/alerts/alert%2F001/notes").mock(
+            return_value=httpx.Response(200, json={"ok": True})
+        )
 
         result = await handlers["add_alert_note"]({"id": "alert/001", "note": "encoded"})
         data = json.loads(result)
