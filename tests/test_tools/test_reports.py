@@ -90,3 +90,43 @@ async def test_list_reports_http_status_error(handlers):
         data = json.loads(result)
         assert "error" in data
         assert data["status_code"] == 503
+
+
+@pytest.mark.asyncio
+async def test_get_report_definition(handlers):
+    rdef = {"id": "def-001", "name": "VM Capacity Report", "definitionType": "CUSTOM"}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/reportdefinitions/def-001").mock(return_value=httpx.Response(200, json=rdef))
+
+        result = await handlers["get_report_definition"]({"id": "def-001"})
+        data = json.loads(result)
+        assert data["id"] == "def-001"
+        assert data["name"] == "VM Capacity Report"
+
+
+@pytest.mark.asyncio
+async def test_get_report(handlers):
+    report = {"id": "rep-001", "name": "VM Capacity Report - Jan", "status": "COMPLETED"}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/reports/rep-001").mock(return_value=httpx.Response(200, json=report))
+
+        result = await handlers["get_report"]({"id": "rep-001"})
+        data = json.loads(result)
+        assert data["id"] == "rep-001"
+        assert data["status"] == "COMPLETED"
+
+
+@pytest.mark.asyncio
+async def test_list_report_schedules(handlers):
+    schedules = {"schedules": [{"id": "sched-001", "recurrence": "FREQ=WEEKLY"}]}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/reportdefinitions/def-001/schedules").mock(
+            return_value=httpx.Response(200, json=schedules)
+        )
+
+        result = await handlers["list_report_schedules"]({"definitionId": "def-001"})
+        data = json.loads(result)
+        assert data["schedules"][0]["id"] == "sched-001"

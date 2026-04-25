@@ -7,17 +7,21 @@ import mcp.types as types
 from mcp.server import Server
 from pydantic import AnyUrl
 
-from ariaops_mcp.tools import alerts, capacity, discovery, metrics, reports, resources
+from ariaops_mcp.config import get_settings
+from ariaops_mcp.tools import alerts, capacity, discovery, metrics, reports, resources, write_ops
 
-TOOL_MODULES = [resources, alerts, metrics, capacity, reports, discovery]
+READ_ONLY_MODULES = [resources, alerts, metrics, capacity, reports, discovery]
 
 
 def _build_registry() -> tuple[list[types.Tool], dict]:
     defs: list[types.Tool] = []
     handlers: dict = {}
-    for mod in TOOL_MODULES:
+    for mod in READ_ONLY_MODULES:
         defs.extend(mod.tool_definitions())
         handlers.update(mod.tool_handlers())
+    if get_settings().enable_write_operations:
+        defs.extend(write_ops.tool_definitions())
+        handlers.update(write_ops.tool_handlers())
     return defs, handlers
 
 

@@ -82,3 +82,87 @@ async def test_get_resource_http_status_error(handlers):
         data = json.loads(result)
         assert "error" in data
         assert data["status_code"] == 404
+
+
+@pytest.mark.asyncio
+async def test_query_resources(handlers):
+    resource_list = {
+        "resourceList": [
+            {"identifier": "vm-002", "resourceKey": {"name": "TestVM2", "adapterKindKey": "VMWARE"}}
+        ]
+    }
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.post(f"{BASE}/resources/query").mock(return_value=httpx.Response(200, json=resource_list))
+
+        result = await handlers["query_resources"]({"adapterKind": "VMWARE", "resourceKind": "VirtualMachine"})
+        data = json.loads(result)
+        assert data["resourceList"][0]["identifier"] == "vm-002"
+
+
+@pytest.mark.asyncio
+async def test_get_resource_properties(handlers):
+    props = {"property": [{"name": "summary|guest", "value": "Ubuntu 22.04"}]}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/resources/vm-001/properties").mock(return_value=httpx.Response(200, json=props))
+
+        result = await handlers["get_resource_properties"]({"id": "vm-001"})
+        data = json.loads(result)
+        assert "property" in data
+
+
+@pytest.mark.asyncio
+async def test_get_resource_relationships(handlers):
+    rels = {"resourceRelations": [{"resourceId": "host-001", "relationshipType": "CHILD"}]}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/resources/vm-001/relationships").mock(return_value=httpx.Response(200, json=rels))
+
+        result = await handlers["get_resource_relationships"]({"id": "vm-001"})
+        data = json.loads(result)
+        assert "resourceRelations" in data
+
+
+@pytest.mark.asyncio
+async def test_get_resource_relationships_invalid_type(handlers):
+    result = await handlers["get_resource_relationships"]({"id": "vm-001", "relationshipType": "INVALID"})
+    data = json.loads(result)
+    assert "error" in data
+    assert "Invalid relationshipType" in data["error"]
+
+
+@pytest.mark.asyncio
+async def test_list_resource_kinds(handlers):
+    kinds = {"resourceKind": [{"resourceKindKey": "VirtualMachine", "adapterKindKey": "VMWARE"}]}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/adapterkinds/VMWARE/resourcekinds").mock(return_value=httpx.Response(200, json=kinds))
+
+        result = await handlers["list_resource_kinds"]({"adapterKindKey": "VMWARE"})
+        data = json.loads(result)
+        assert "resourceKind" in data
+
+
+@pytest.mark.asyncio
+async def test_list_resource_groups(handlers):
+    groups = {"resourceGroups": [{"id": "grp-001", "name": "Production VMs"}]}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/resources/groups").mock(return_value=httpx.Response(200, json=groups))
+
+        result = await handlers["list_resource_groups"]({})
+        data = json.loads(result)
+        assert "resourceGroups" in data
+
+
+@pytest.mark.asyncio
+async def test_get_resource_group_members(handlers):
+    members = {"members": [{"identifier": "vm-001"}, {"identifier": "vm-002"}]}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/resources/groups/grp-001/members").mock(return_value=httpx.Response(200, json=members))
+
+        result = await handlers["get_resource_group_members"]({"groupId": "grp-001"})
+        data = json.loads(result)
+        assert "members" in data

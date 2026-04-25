@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     transport: Literal["stdio", "http"] = Field("stdio", alias="ARIAOPS_TRANSPORT")
     port: int = Field(8080, alias="ARIAOPS_PORT")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field("INFO", alias="ARIAOPS_LOG_LEVEL")
+    enable_write_operations: bool = Field(False, alias="ARIAOPS_ENABLE_WRITE_OPERATIONS")
 
     model_config = {"populate_by_name": True}
 

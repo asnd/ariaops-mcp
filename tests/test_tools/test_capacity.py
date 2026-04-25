@@ -123,15 +123,18 @@ async def test_get_capacity_forecast_insufficient_data(handlers):
     insufficient_data = {
         "resourceList": [{
             "identifier": "test-resource-id",
-            "data": [
-                {"data": [100.0]}  # Only one data point
-            ]
+            "data": [{"data": [100.0]}]  # Only one data point
         }]
     }
-    
+    history_url = f"{BASE}/resources/stats/history/query"
+
     with respx.mock:
-        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
-        respx.post(f"{BASE}/resources/stats/history/query").mock(return_value=httpx.Response(200, json=insufficient_data))
+        respx.post(f"{BASE}/auth/token/acquire").mock(
+            return_value=httpx.Response(200, json=TOKEN_RESPONSE)
+        )
+        respx.post(history_url).mock(
+            return_value=httpx.Response(200, json=insufficient_data)
+        )
 
         result = await handlers["get_capacity_forecast"]({
             "id": "test-resource-id",
@@ -193,15 +196,18 @@ async def test_get_trend_analysis_insufficient_data(handlers):
     insufficient_data = {
         "resourceList": [{
             "identifier": "test-resource-id",
-            "data": [
-                {"data": [100.0]}  # Only one data point
-            ]
+            "data": [{"data": [100.0]}]  # Only one data point
         }]
     }
-    
+    history_url = f"{BASE}/resources/stats/history/query"
+
     with respx.mock:
-        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
-        respx.post(f"{BASE}/resources/stats/history/query").mock(return_value=httpx.Response(200, json=insufficient_data))
+        respx.post(f"{BASE}/auth/token/acquire").mock(
+            return_value=httpx.Response(200, json=TOKEN_RESPONSE)
+        )
+        respx.post(history_url).mock(
+            return_value=httpx.Response(200, json=insufficient_data)
+        )
 
         result = await handlers["get_trend_analysis"]({
             "id": "test-resource-id",

@@ -14,7 +14,7 @@ A **read-only** Model Context Protocol (MCP) server that exposes VMware Aria Ope
 | Constraint          | Value                                    |
 |---------------------|------------------------------------------|
 | Deployment          | On-prem only (no SaaS/Cloud support)    |
-| Access mode         | **Read-only** — no mutations             |
+| Access mode         | Read-only by default; write operations opt-in via `ARIAOPS_ENABLE_WRITE_OPERATIONS=true` |
 | Language            | Python 3.11+                             |
 | MCP SDK             | `mcp` (official Python SDK)              |
 | Transport           | `stdio` (testing/local) + `streamable HTTP` (production) |
@@ -246,6 +246,7 @@ All via environment variables (12-factor):
 | `ARIAOPS_PORT`        | No       | `8080`    | HTTP transport listen port         |
 | `ARIAOPS_TRANSPORT`   | No       | `stdio`   | `stdio` or `http`                  |
 | `ARIAOPS_LOG_LEVEL`   | No       | `INFO`    | Logging level                      |
+| `ARIAOPS_ENABLE_WRITE_OPERATIONS` | No | `false` | Enable write/mutating tools      |
 
 ---
 
@@ -268,7 +269,6 @@ All via environment variables (12-factor):
 
 ## 11. Out of Scope (v1)
 
-- Write operations (acknowledge alerts, create groups, modify policies)
 - SaaS / VMware Cloud deployment
 - SSO / SAML authentication
 - WebSocket transport
@@ -276,3 +276,4 @@ All via environment variables (12-factor):
 - Multi-tenancy
 - Custom dashboards API
 - Super metric creation
+- Policy CRUD (create/update/delete policies, assign to objects)

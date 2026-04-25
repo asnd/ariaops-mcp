@@ -6,11 +6,10 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
-import httpx
 import mcp.types as types
 
 from ariaops_mcp.client import get_client
-from ariaops_mcp.tools._common import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, truncate_list_response
+from ariaops_mcp.tools._common import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, format_error, truncate_list_response
 
 
 def tool_definitions() -> list[types.Tool]:
@@ -98,12 +97,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             )
             data = truncate_list_response(data, "reportDefinitions")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_report_definition(args: dict) -> str:
         if not args.get("id"):
@@ -111,12 +106,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         try:
             data = await get_client().get(f"/reportdefinitions/{quote(args['id'], safe='')}")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def list_reports(args: dict) -> str:
         try:
@@ -129,12 +120,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             )
             data = truncate_list_response(data, "reports")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_report(args: dict) -> str:
         if not args.get("id"):
@@ -142,12 +129,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         try:
             data = await get_client().get(f"/reports/{quote(args['id'], safe='')}")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def download_report(args: dict) -> str:
         if not args.get("id"):
@@ -156,12 +139,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             raw = await get_client().get_bytes(f"/reports/{quote(args['id'], safe='')}/download")
             encoded = base64.b64encode(raw).decode("utf-8")
             return json.dumps({"reportId": args["id"], "encoding": "base64", "content": encoded})
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def list_report_schedules(args: dict) -> str:
         if not args.get("definitionId"):
@@ -169,12 +148,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         try:
             data = await get_client().get(f"/reportdefinitions/{quote(args['definitionId'], safe='')}/schedules")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     return {
         "list_report_definitions": list_report_definitions,

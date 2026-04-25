@@ -12,6 +12,7 @@ import httpx
 import mcp.types as types
 
 from ariaops_mcp.client import get_client
+from ariaops_mcp.tools._common import format_error
 
 logger = logging.getLogger(__name__)
 
@@ -183,23 +184,15 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 },
                 indent=2,
             )
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def list_policies(args: dict) -> str:
         try:
             data = await get_client().get("/policies")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_capacity_forecast(args: dict) -> str:
         if not args.get("id"):
@@ -216,8 +209,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         
         try:
             client = get_client()
-            _ = quote(resource_id, safe="")
-            
+
             # Get historical stats for the metric
             end_time = int(time.time() * 1000)
             start_time = end_time - (history_days * 24 * 60 * 60 * 1000)
@@ -360,12 +352,10 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             return json.dumps(result, indent=2)
             
         except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
+            return format_error(e)
         except Exception as e:
             logger.exception("Error in capacity forecast")
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_trend_analysis(args: dict) -> str:
         if not args.get("id"):
@@ -379,8 +369,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         
         try:
             client = get_client()
-            _ = quote(resource_id, safe="")
-            
+
             # Get historical stats for the metric
             end_time = int(time.time() * 1000)
             start_time = end_time - (period_days * 24 * 60 * 60 * 1000)
@@ -462,23 +451,23 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 mean_val = statistics.mean(numeric_values)
                 median_val = statistics.median(numeric_values)
                 stdev_val = statistics.stdev(numeric_values) if n > 1 else 0
-                
+
                 # Calculate trend using linear regression
                 x_values = list(range(n))
                 sum_x = sum(x_values)
                 sum_y = sum(numeric_values)
                 sum_xy = sum(x * y for x, y in zip(x_values, numeric_values))
                 sum_x2 = sum(x * x for x in x_values)
-                
+
                 denominator = n * sum_x2 - sum_x * sum_x
                 if denominator == 0:
                     slope = 0
                 else:
                     slope = (n * sum_xy - sum_x * sum_y) / denominator
-                
+
                 # Calculate volatility (coefficient of variation)
                 volatility = (stdev_val / mean_val * 100) if mean_val != 0 else 0
-                
+
                 # Detect seasonality (simple approach: compare weekly patterns)
                 seasonality_detected = False
                 seasonality_strength = 0
@@ -487,7 +476,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                     weekly_patterns = []
                     days_per_week = 7
                     weeks = n // days_per_week
-                    
+
                     if weeks >= 2:
                         for week in range(weeks):
                             start_idx = week * days_per_week
@@ -495,7 +484,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                             week_data = numeric_values[start_idx:end_idx]
                             if len(week_data) == days_per_week:
                                 weekly_patterns.append(week_data)
-                        
+
                         if len(weekly_patterns) >= 2:
                             # Calculate correlation between first and subsequent weeks
                             first_week = weekly_patterns[0]
@@ -505,28 +494,33 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                                     # Simple correlation calculation
                                     mean_first = statistics.mean(first_week)
                                     mean_week = statistics.mean(week)
-                                    if stdev_val > 0 and statistics.stdev(week) > 0:
-                                        cov = sum((x - mean_first) * (y - mean_week) for x, y in zip(first_week, week))
-                                    # Compute correlation coefficient
-                                    denom = len(first_week) * statistics.stdev(first_week) * statistics.stdev(week)
-                                    corr = cov / denom
-                                    correlations.append(corr)
-                            
+                                    try:
+                                        stdev_week = statistics.stdev(week)
+                                        stdev_first = statistics.stdev(first_week)
+                                        if stdev_first > 0 and stdev_week > 0:
+                                            cov = sum(
+                                                (x - mean_first) * (y - mean_week)
+                                                for x, y in zip(first_week, week)
+                                            )
+                                            denom = len(first_week) * stdev_first * stdev_week
+                                            corr = cov / denom
+                                            correlations.append(corr)
+                                    except statistics.StatisticsError:
+                                        continue
+
                             if correlations:
                                 seasonality_strength = abs(statistics.mean(correlations))
-                                seasonality_detected = seasonality_strength > 0.3  # Threshold for seasonality
-                    
-                  
+                                seasonality_detected = seasonality_strength > 0.3
+
                 # Calculate recent trend (last 20% of data vs previous)
                 recent_start = max(0, int(n * 0.8))
                 if recent_start < n - 1:
                     recent_values = numeric_values[recent_start:]
                     previous_values = numeric_values[:recent_start]
-                      
+
                     if len(recent_values) >= 2 and len(previous_values) >= 2:
                         recent_mean = statistics.mean(recent_values)
                         previous_mean = statistics.mean(previous_values)
-                        # Percentage change between recent and previous means
                         if previous_mean != 0:
                             trend_change = (recent_mean - previous_mean) / previous_mean * 100
                         else:
@@ -535,7 +529,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                         trend_change = 0
                 else:
                     trend_change = 0
-                  
+
                 # Determine trend direction
                 if slope > 0.01:
                     trend_direction = "increasing"
@@ -543,7 +537,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                     trend_direction = "decreasing"
                 else:
                     trend_direction = "stable"
-                
+
                 result = {
                     "resourceId": resource_id,
                     "metric": metric,
@@ -551,7 +545,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                     "dataPoints": len(numeric_values),
                     "timeRange": {
                         "startTimestamp": valid_timestamps[0] if valid_timestamps else 0,
-                        "endTimestamp": valid_timestamps[-1] if valid_timestamps else 0
+                        "endTimestamp": valid_timestamps[-1] if valid_timestamps else 0,
                     },
                     "statistics": {
                         "mean": mean_val,
@@ -560,38 +554,38 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                         "min": min(numeric_values),
                         "max": max(numeric_values),
                         "range": max(numeric_values) - min(numeric_values),
-                        "volatilityPercent": round(volatility, 2)
+                        "volatilityPercent": round(volatility, 2),
                     },
                     "trend": {
                         "direction": trend_direction,
                         "slope": slope,
                         "dailyChangeRate": slope,
                         "recentChangePercent": round(trend_change, 2),
-                        "isSignificant": abs(slope) > (stdev_val * 0.1) if stdev_val > 0 else False
+                        "isSignificant": abs(slope) > (stdev_val * 0.1) if stdev_val > 0 else False,
                     },
                     "patterns": {
                         "seasonalityDetected": seasonality_detected,
-                        "seasonalityStrength": round(seasonality_strength, 3) if seasonality_detected else 0
+                        "seasonalityStrength": round(seasonality_strength, 3) if seasonality_detected else 0,
                     },
-                    "generatedAt": int(time.time() * 1000)
+                    "generatedAt": int(time.time() * 1000),
                 }
-                
+
                 return json.dumps(result, indent=2)
             else:
-                return json.dumps({
-                    "error": "Insufficient data for trend analysis",
-                    "resourceId": resource_id,
-                    "metric": metric,
-                    "dataPoints": len(numeric_values)
-                })
-                
+                return json.dumps(
+                    {
+                        "error": "Insufficient data for trend analysis",
+                        "resourceId": resource_id,
+                        "metric": metric,
+                        "dataPoints": len(numeric_values),
+                    }
+                )
+
         except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
+            return format_error(e)
         except Exception as e:
             logger.exception("Error in trend analysis")
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     return {
         "get_capacity_remaining": get_capacity_remaining,

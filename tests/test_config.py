@@ -35,3 +35,33 @@ def test_transport_and_log_level_normalized(monkeypatch):
     settings = Settings()  # type: ignore[call-arg]
     assert settings.transport == "http"
     assert settings.log_level == "DEBUG"
+
+
+def test_write_operations_disabled_by_default(monkeypatch):
+    monkeypatch.setenv("ARIAOPS_HOST", "vrops.test.local")
+    monkeypatch.setenv("ARIAOPS_USERNAME", "testuser")
+    monkeypatch.setenv("ARIAOPS_PASSWORD", "testpass")
+
+    settings = Settings()  # type: ignore[call-arg]
+    assert settings.enable_write_operations is False
+
+
+def test_write_operations_enabled(monkeypatch):
+    monkeypatch.setenv("ARIAOPS_HOST", "vrops.test.local")
+    monkeypatch.setenv("ARIAOPS_USERNAME", "testuser")
+    monkeypatch.setenv("ARIAOPS_PASSWORD", "testpass")
+    monkeypatch.setenv("ARIAOPS_ENABLE_WRITE_OPERATIONS", "true")
+
+    settings = Settings()  # type: ignore[call-arg]
+    assert settings.enable_write_operations is True
+
+
+def test_write_operations_false_string(monkeypatch):
+    monkeypatch.setenv("ARIAOPS_HOST", "vrops.test.local")
+    monkeypatch.setenv("ARIAOPS_USERNAME", "testuser")
+    monkeypatch.setenv("ARIAOPS_PASSWORD", "testpass")
+    monkeypatch.setenv("ARIAOPS_ENABLE_WRITE_OPERATIONS", "false")
+
+    settings = Settings()  # type: ignore[call-arg]
+    assert settings.enable_write_operations is False
+
