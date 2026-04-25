@@ -216,7 +216,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         
         try:
             client = get_client()
-            rid = quote(resource_id, safe="")
+            _ = quote(resource_id, safe="")
             
             # Get historical stats for the metric
             end_time = int(time.time() * 1000)
@@ -234,7 +234,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             
             # Extract data points
             values = []
-            timestamps = []
+            # timestamps placeholder (unused)
             
             # Handle different response formats
             if isinstance(stats_data, dict):
@@ -251,7 +251,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                             
                             # Extract timestamps if available
                             if len(stat_list) > 1 and "timestamps" in stat_list[1]:
-                                timestamps = stat_list[1].get("timestamps", [])
+                                # timestamps placeholder (unused)
+                                pass
             elif isinstance(stats_data, list) and len(stats_data) > 0:
                 # Direct list format
                 values = stats_data[0].get("data", []) if isinstance(stats_data[0], dict) else []
@@ -378,7 +379,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         
         try:
             client = get_client()
-            rid = quote(resource_id, safe="")
+            _ = quote(resource_id, safe="")
             
             # Get historical stats for the metric
             end_time = int(time.time() * 1000)
@@ -505,30 +506,36 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                                     mean_first = statistics.mean(first_week)
                                     mean_week = statistics.mean(week)
                                     if stdev_val > 0 and statistics.stdev(week) > 0:
-                                        cov = sum((x - mean_first) * (y - mean_week) 
-                                                for x, y in zip(first_week, week))
-                                        corr = cov / (len(first_week) * statistics.stdev(first_week) * statistics.stdev(week))
-                                        correlations.append(corr)
+                                        cov = sum((x - mean_first) * (y - mean_week) for x, y in zip(first_week, week))
+                                    # Compute correlation coefficient
+                                    denom = len(first_week) * statistics.stdev(first_week) * statistics.stdev(week)
+                                    corr = cov / denom
+                                    correlations.append(corr)
                             
                             if correlations:
                                 seasonality_strength = abs(statistics.mean(correlations))
                                 seasonality_detected = seasonality_strength > 0.3  # Threshold for seasonality
-                
+                    
+                  
                 # Calculate recent trend (last 20% of data vs previous)
                 recent_start = max(0, int(n * 0.8))
                 if recent_start < n - 1:
                     recent_values = numeric_values[recent_start:]
                     previous_values = numeric_values[:recent_start]
-                    
+                      
                     if len(recent_values) >= 2 and len(previous_values) >= 2:
                         recent_mean = statistics.mean(recent_values)
                         previous_mean = statistics.mean(previous_values)
-                        trend_change = ((recent_mean - previous_mean) / previous_mean * 100) if previous_mean != 0 else 0
+                        # Percentage change between recent and previous means
+                        if previous_mean != 0:
+                            trend_change = (recent_mean - previous_mean) / previous_mean * 100
+                        else:
+                            trend_change = 0
                     else:
                         trend_change = 0
                 else:
                     trend_change = 0
-                
+                  
                 # Determine trend direction
                 if slope > 0.01:
                     trend_direction = "increasing"
