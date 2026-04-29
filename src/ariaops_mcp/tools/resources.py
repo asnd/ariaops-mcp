@@ -5,11 +5,10 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
-import httpx
 import mcp.types as types
 
 from ariaops_mcp.client import get_client
-from ariaops_mcp.tools._common import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, apply_response_shaping, truncate_list_response
+from ariaops_mcp.tools._common import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, format_error, truncate_list_response
 
 VALID_RELATIONSHIP_TYPES = {"PARENT", "CHILD", "ALL"}
 
@@ -31,16 +30,6 @@ def tool_definitions() -> list[types.Tool]:
                         "default": PAGE_SIZE_DEFAULT,
                         "minimum": 1,
                         "maximum": PAGE_SIZE_MAX,
-                    },
-                    "fields": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Return only these top-level fields per item to reduce payload size.",
-                    },
-                    "summaryOnly": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "When true, return only key identifying fields per item (compact mode).",
                     },
                 },
             },
@@ -69,16 +58,6 @@ def tool_definitions() -> list[types.Tool]:
                         "default": PAGE_SIZE_DEFAULT,
                         "minimum": 1,
                         "maximum": PAGE_SIZE_MAX,
-                    },
-                    "fields": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Return only these top-level fields per item to reduce payload size.",
-                    },
-                    "summaryOnly": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "When true, return only key identifying fields per item (compact mode).",
                     },
                 },
             },
@@ -131,16 +110,6 @@ def tool_definitions() -> list[types.Tool]:
                         "minimum": 1,
                         "maximum": PAGE_SIZE_MAX,
                     },
-                    "fields": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Return only these top-level fields per item to reduce payload size.",
-                    },
-                    "summaryOnly": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "When true, return only key identifying fields per item (compact mode).",
-                    },
                 },
             },
         ),
@@ -169,19 +138,10 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 page=page,
                 pageSize=page_size,
             )
-            data = truncate_list_response(data, "resourceList", page=page, page_size=page_size)
-            data = apply_response_shaping(
-                data, "resourceList",
-                fields=args.get("fields"),
-                summary_only=bool(args.get("summaryOnly", False)),
-            )
+            data = truncate_list_response(data, "resourceList")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_resource(args: dict) -> str:
         if not args.get("id"):
@@ -189,12 +149,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         try:
             data = await get_client().get(f"/resources/{quote(args['id'], safe='')}")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def query_resources(args: dict) -> str:
         try:
@@ -213,19 +169,10 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 page=page,
                 pageSize=page_size,
             )
-            data = truncate_list_response(data, "resourceList", page=page, page_size=page_size)
-            data = apply_response_shaping(
-                data, "resourceList",
-                fields=args.get("fields"),
-                summary_only=bool(args.get("summaryOnly", False)),
-            )
+            data = truncate_list_response(data, "resourceList")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_resource_properties(args: dict) -> str:
         if not args.get("id"):
@@ -233,12 +180,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         try:
             data = await get_client().get(f"/resources/{quote(args['id'], safe='')}/properties")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_resource_relationships(args: dict) -> str:
         if not args.get("id"):
@@ -255,23 +198,15 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             else:
                 data = await get_client().get(f"/resources/{rid}/relationships/{rel}")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def list_adapter_kinds(args: dict) -> str:
         try:
             data = await get_client().get("/adapterkinds")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def list_resource_kinds(args: dict) -> str:
         if not args.get("adapterKindKey"):
@@ -279,12 +214,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         try:
             data = await get_client().get(f"/adapterkinds/{quote(args['adapterKindKey'], safe='')}/resourcekinds")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def list_resource_groups(args: dict) -> str:
         try:
@@ -295,19 +226,10 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 page=page,
                 pageSize=page_size,
             )
-            data = truncate_list_response(data, "resourceGroups", page=page, page_size=page_size)
-            data = apply_response_shaping(
-                data, "resourceGroups",
-                fields=args.get("fields"),
-                summary_only=bool(args.get("summaryOnly", False)),
-            )
+            data = truncate_list_response(data, "resourceGroups")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_resource_group_members(args: dict) -> str:
         if not args.get("groupId"):
@@ -315,12 +237,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         try:
             data = await get_client().get(f"/resources/groups/{quote(args['groupId'], safe='')}/members")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     return {
         "list_resources": list_resources,

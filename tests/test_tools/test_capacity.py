@@ -81,3 +81,149 @@ async def test_get_capacity_overview_http_status_error(handlers):
         data = json.loads(result)
         assert "error" in data
         assert data["status_code"] == 503
+
+
+@pytest.mark.asyncio
+async def test_get_capacity_forecast_success(handlers):
+    # Mock historical data response
+    historical_data = {
+        "resourceList": [{
+            "identifier": "test-resource-id",
+            "data": [
+                {"data": [100.0, 90.0, 80.0, 70.0, 60.0]},  # Decreasing trend
+                {"data": [1000, 1001, 1002, 1003, 1004], "timestamps": [1000, 2000, 3000, 4000, 5000]}
+            ]
+        }]
+    }
+    
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.post(f"{BASE}/resources/stats/history/query").mock(return_value=httpx.Response(200, json=historical_data))
+
+        result = await handlers["get_capacity_forecast"]({
+            "id": "test-resource-id",
+            "metric": "capacity|remainingCapacity",
+            "days_ahead": 5
+        })
+        data = json.loads(result)
+
+        assert data["resourceId"] == "test-resource-id"
+        assert data["metric"] == "capacity|remainingCapacity"
+        assert data["forecastPeriodDays"] == 5
+        assert len(data["forecast"]) == 5
+        assert "historicalStats" in data
+        assert data["historicalStats"]["trend"] == "decreasing"
+        # Check that forecast values are projected (should be decreasing based on historical trend)
+        assert data["forecast"][0]["predictedValue"] < 60.0  # Last historical value was 60.0
+
+
+@pytest.mark.asyncio
+async def test_get_capacity_forecast_insufficient_data(handlers):
+    # Mock insufficient historical data
+    insufficient_data = {
+        "resourceList": [{
+            "identifier": "test-resource-id",
+            "data": [{"data": [100.0]}]  # Only one data point
+        }]
+    }
+    history_url = f"{BASE}/resources/stats/history/query"
+
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(
+            return_value=httpx.Response(200, json=TOKEN_RESPONSE)
+        )
+        respx.post(history_url).mock(
+            return_value=httpx.Response(200, json=insufficient_data)
+        )
+
+        result = await handlers["get_capacity_forecast"]({
+            "id": "test-resource-id",
+            "metric": "capacity|remainingCapacity",
+            "days_ahead": 5
+        })
+        data = json.loads(result)
+
+        assert "error" in data
+        assert "Insufficient historical data" in data["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_capacity_forecast_missing_args(handlers):
+    # Test missing required arguments
+    result = await handlers["get_capacity_forecast"]({})
+    data = json.loads(result)
+    assert "error" in data
+    assert "id" in data["error"] or "metric" in data["error"] or "days_ahead" in data["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_trend_analysis_success(handlers):
+    # Mock historical data with clear trend
+    historical_data = {
+        "resourceList": [{
+            "identifier": "test-resource-id",
+            "data": [
+                {"data": [10.0, 20.0, 30.0, 40.0, 50.0]},  # Increasing trend
+                {"data": [1000, 2000, 3000, 4000, 5000], "timestamps": [1000, 2000, 3000, 4000, 5000]}
+            ]
+        }]
+    }
+    
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.post(f"{BASE}/resources/stats/history/query").mock(return_value=httpx.Response(200, json=historical_data))
+
+        result = await handlers["get_trend_analysis"]({
+            "id": "test-resource-id",
+            "metric": "mem|host_usable",
+            "period_days": 30
+        })
+        data = json.loads(result)
+
+        assert data["resourceId"] == "test-resource-id"
+        assert data["metric"] == "mem|host_usable"
+        assert data["dataPoints"] == 5
+        assert data["trend"]["direction"] == "increasing"
+        assert data["trend"]["slope"] > 0
+        assert data["statistics"]["mean"] == 30.0
+        assert data["statistics"]["min"] == 10.0
+        assert data["statistics"]["max"] == 50.0
+
+
+@pytest.mark.asyncio
+async def test_get_trend_analysis_insufficient_data(handlers):
+    # Mock insufficient historical data
+    insufficient_data = {
+        "resourceList": [{
+            "identifier": "test-resource-id",
+            "data": [{"data": [100.0]}]  # Only one data point
+        }]
+    }
+    history_url = f"{BASE}/resources/stats/history/query"
+
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(
+            return_value=httpx.Response(200, json=TOKEN_RESPONSE)
+        )
+        respx.post(history_url).mock(
+            return_value=httpx.Response(200, json=insufficient_data)
+        )
+
+        result = await handlers["get_trend_analysis"]({
+            "id": "test-resource-id",
+            "metric": "mem|host_usable",
+            "period_days": 30
+        })
+        data = json.loads(result)
+
+        assert "error" in data
+        assert "Insufficient historical data" in data["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_trend_analysis_missing_args(handlers):
+    # Test missing required arguments
+    result = await handlers["get_trend_analysis"]({})
+    data = json.loads(result)
+    assert "error" in data
+    assert "id" in data["error"] or "metric" in data["error"]

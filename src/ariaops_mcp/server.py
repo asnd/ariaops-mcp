@@ -7,96 +7,40 @@ import mcp.types as types
 from mcp.server import Server
 from pydantic import AnyUrl
 
-from ariaops_mcp.config import write_operations_enabled
-from ariaops_mcp.tools import alerts, capacity, discovery, metrics, reports, resources
-from ariaops_mcp.tools import write_ops as write_operations_tools
+from ariaops_mcp.config import get_settings
+from ariaops_mcp.tools import alerts, capacity, discovery, metrics, reports, resources, write_ops
 
-TOOL_MODULES = [resources, alerts, metrics, capacity, reports, discovery]
-WRITE_TOOL_MODULES = [write_operations_tools]
+READ_ONLY_MODULES = [resources, alerts, metrics, capacity, reports, discovery]
 
 
-def _is_missing_required_argument(value: object) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, str):
-        return not value.strip()
-    if isinstance(value, list):
-        return len(value) == 0 or all(_is_missing_required_argument(item) for item in value)
-    return False
-
-
-def _missing_required_arguments(tool: types.Tool, arguments: dict) -> list[str]:
-    required = tool.inputSchema.get("required", [])
-    return [key for key in required if _is_missing_required_argument(arguments.get(key))]
-
-
-def _build_registry(include_write_operations: bool = False) -> tuple[list[types.Tool], dict]:
+def _build_registry() -> tuple[list[types.Tool], dict]:
     defs: list[types.Tool] = []
     handlers: dict = {}
-    modules = TOOL_MODULES + (WRITE_TOOL_MODULES if include_write_operations else [])
-    for mod in modules:
+    for mod in READ_ONLY_MODULES:
         defs.extend(mod.tool_definitions())
         handlers.update(mod.tool_handlers())
+    if get_settings().enable_write_operations:
+        defs.extend(write_ops.tool_definitions())
+        handlers.update(write_ops.tool_handlers())
     return defs, handlers
 
 
-def _build_tool_defs_by_name(tool_defs: list[types.Tool]) -> dict[str, types.Tool]:
-    by_name: dict[str, types.Tool] = {}
-    for tool in tool_defs:
-        if tool.name in by_name:
-            raise ValueError(f"Duplicate tool definition: {tool.name}")
-        by_name[tool.name] = tool
-    return by_name
+_TOOL_DEFS, _TOOL_HANDLERS = _build_registry()
 
 
 def create_server() -> Server:
-    tool_defs, tool_handlers = _build_registry(include_write_operations=write_operations_enabled())
-    tool_defs_by_name = _build_tool_defs_by_name(tool_defs)
     server = Server("ariaops-mcp")
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
-        return tool_defs
+        return _TOOL_DEFS
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict | None) -> list[types.TextContent]:
-        handler = tool_handlers.get(name)
+        handler = _TOOL_HANDLERS.get(name)
         if not handler:
             raise ValueError(f"Unknown tool: {name}")
-        tool = tool_defs_by_name.get(name)
-        if not tool:
-            raise ValueError(f"Tool metadata not found: {name}")
-
-        if arguments is not None and not isinstance(arguments, dict):
-            return [
-                types.TextContent(
-                    type="text",
-                    text=json.dumps(
-                        {
-                            "error": "Invalid tool arguments payload",
-                            "detail": "Expected a JSON object for tool arguments.",
-                        }
-                    ),
-                )
-            ]
-
-        parsed_args = arguments or {}
-        missing_required = _missing_required_arguments(tool, parsed_args)
-        if missing_required:
-            return [
-                types.TextContent(
-                    type="text",
-                    text=json.dumps(
-                        {
-                            "error": f"Missing required argument(s): {', '.join(missing_required)}",
-                            "missing": missing_required,
-                            "next_step": "Ask the user for the missing value(s) and retry this tool call.",
-                        }
-                    ),
-                )
-            ]
-
-        result = await handler(parsed_args)
+        result = await handler(arguments or {})
         return [types.TextContent(type="text", text=result)]
 
     @server.list_resources()

@@ -14,7 +14,7 @@ A **read-only** Model Context Protocol (MCP) server that exposes VMware Aria Ope
 | Constraint          | Value                                    |
 |---------------------|------------------------------------------|
 | Deployment          | On-prem only (no SaaS/Cloud support)    |
-| Access mode         | Read-only by default; optional gated writes |
+| Access mode         | Read-only by default; write operations opt-in via `ARIAOPS_ENABLE_WRITE_OPERATIONS=true` |
 | Language            | Python 3.11+                             |
 | MCP SDK             | `mcp` (official Python SDK)              |
 | Transport           | `stdio` (testing/local) + `streamable HTTP` (production) |
@@ -49,7 +49,7 @@ Response: { "token": "...", "validity": 1234567890, "expiresAt": "..." }
 
 ## 4. MCP Tools — Functional Scope
 
-Tools are read-only by default. Optional write tools are feature-flagged via `ARIAOPS_ENABLE_WRITE_OPERATIONS=true`.
+All tools are **read-only**. Organized by domain.
 
 ### 4.1 Resources
 
@@ -246,7 +246,7 @@ All via environment variables (12-factor):
 | `ARIAOPS_PORT`        | No       | `8080`    | HTTP transport listen port         |
 | `ARIAOPS_TRANSPORT`   | No       | `stdio`   | `stdio` or `http`                  |
 | `ARIAOPS_LOG_LEVEL`   | No       | `INFO`    | Logging level                      |
-| `ARIAOPS_ENABLE_WRITE_OPERATIONS` | No | `false` | Enables write tools (alert note + status actions) |
+| `ARIAOPS_ENABLE_WRITE_OPERATIONS` | No | `false` | Enable write/mutating tools      |
 
 ---
 
@@ -262,14 +262,13 @@ All via environment variables (12-factor):
 | NFR-6  | Structured JSON logging when running in HTTP mode |
 | NFR-7  | Containerfile uses multi-stage build, runs as non-root |
 | NFR-8  | Health endpoint at `/health` in HTTP mode (returns Aria Ops connectivity status) |
-| NFR-9  | Pagination: paginated list/query tools support `page`/`pageSize` params (`page` default `0`, `pageSize` default `50`, max `200`; `get_capacity_overview` default `pageSize=20`) and return total count when available |
-| NFR-10 | Large responses are truncated to avoid exceeding MCP message limits (default 50 items), with truncation metadata and pagination hints in the response |
+| NFR-9  | Pagination: tools that return lists must support `page`/`pageSize` params and return total count |
+| NFR-10 | Large responses truncated to avoid exceeding MCP message limits (configurable max, default 50 items) |
 
 ---
 
 ## 11. Out of Scope (v1)
 
-- Additional write operations beyond the feature-flagged alert note/status tools (for example group creation, policy mutation)
 - SaaS / VMware Cloud deployment
 - SSO / SAML authentication
 - WebSocket transport
@@ -277,3 +276,4 @@ All via environment variables (12-factor):
 - Multi-tenancy
 - Custom dashboards API
 - Super metric creation
+- Policy CRUD (create/update/delete policies, assign to objects)

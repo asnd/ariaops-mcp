@@ -53,3 +53,39 @@ async def test_get_version_http_status_error(handlers):
         data = json.loads(result)
         assert "error" in data
         assert data["status_code"] == 503
+
+
+@pytest.mark.asyncio
+async def test_list_symptoms(handlers):
+    symptoms = {"symptomDefinitions": [{"id": "sym-001", "name": "High CPU Usage"}]}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/symptomdefinitions").mock(return_value=httpx.Response(200, json=symptoms))
+
+        result = await handlers["list_symptoms"]({})
+        data = json.loads(result)
+        assert "symptomDefinitions" in data
+
+
+@pytest.mark.asyncio
+async def test_list_recommendations(handlers):
+    recs = {"recommendations": [{"id": "rec-001", "name": "Right-size VM"}]}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/recommendations").mock(return_value=httpx.Response(200, json=recs))
+
+        result = await handlers["list_recommendations"]({})
+        data = json.loads(result)
+        assert "recommendations" in data
+
+
+@pytest.mark.asyncio
+async def test_list_supermetrics(handlers):
+    smetrics = {"superMetrics": [{"id": "sm-001", "name": "Custom CPU Ratio"}]}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/supermetrics").mock(return_value=httpx.Response(200, json=smetrics))
+
+        result = await handlers["list_supermetrics"]({})
+        data = json.loads(result)
+        assert data["superMetrics"][0]["id"] == "sm-001"

@@ -33,12 +33,14 @@ def main() -> None:
 
                     await get_client().get("/versions/current")
                     body = json.dumps({"status": "ok"}).encode()
+                    status = 200
                 except Exception as e:
                     body = json.dumps({"status": "degraded", "detail": str(e)}).encode()
+                    status = 503
                 await send(
                     {
                         "type": "http.response.start",
-                        "status": 200,
+                        "status": status,
                         "headers": [(b"content-type", b"application/json")],
                     }
                 )

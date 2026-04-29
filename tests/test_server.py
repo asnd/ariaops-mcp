@@ -1,48 +1,158 @@
-"""Tests for server-level tool argument validation."""
+"""Tests for MCP server creation and behavior."""
 
-from ariaops_mcp.server import _build_registry, _is_missing_required_argument, _missing_required_arguments
-from ariaops_mcp.tools import metrics, resources
+import json
 
+import httpx
+import pytest
+import respx
+from mcp.types import (
+    CallToolRequest,
+    ListResourcesRequest,
+    ListToolsRequest,
+    ReadResourceRequest,
+)
 
-def test_missing_required_argument_corner_cases():
-    assert _is_missing_required_argument(None)
-    assert _is_missing_required_argument("")
-    assert _is_missing_required_argument("   ")
-    assert _is_missing_required_argument([])
-    assert _is_missing_required_argument(["", "  "])
-    assert not _is_missing_required_argument("vm-001")
-    assert not _is_missing_required_argument([" ", "vm-001"])
+from ariaops_mcp.server import create_server
+from tests.conftest import TOKEN_RESPONSE
 
-
-def test_missing_required_arguments_for_string_required_field():
-    tool = next((tool for tool in resources.tool_definitions() if tool.name == "get_resource"), None)
-    assert tool is not None, "get_resource tool not found in resources.tool_definitions()"
-    assert _missing_required_arguments(tool, {"id": "   "}) == ["id"]
-    assert _missing_required_arguments(tool, {"id": "vm-001"}) == []
+BASE = "https://vrops.test.local/suite-api/api"
 
 
-def test_missing_required_arguments_for_list_required_field():
-    tool = next((tool for tool in metrics.tool_definitions() if tool.name == "query_stats"), None)
-    assert tool is not None, "query_stats tool not found in metrics.tool_definitions()"
-    assert _missing_required_arguments(
-        tool, {"resourceIds": [" "], "statKeys": ["cpu|usage_average"]}
-    ) == ["resourceIds"]
-    assert _missing_required_arguments(tool, {"resourceIds": ["vm-001"], "statKeys": ["cpu|usage_average"]}) == []
+@pytest.mark.asyncio
+async def test_list_tools_readonly(mock_env):
+    server = create_server()
+    result = await server.request_handlers[ListToolsRequest](
+        ListToolsRequest(method="tools/list", params=None)
+    )
+    tools = result.root.tools
+    tool_names = {t.name for t in tools}
+    assert "list_resources" in tool_names
+    assert "list_alerts" in tool_names
+    assert "get_resource_stats" in tool_names
+    assert "list_report_definitions" in tool_names
+    assert "modify_alerts" not in tool_names
+    assert "delete_resources" not in tool_names
 
 
-def test_registry_excludes_write_tools_by_default():
-    defs, handlers = _build_registry()
-    names = {tool.name for tool in defs}
-    assert "add_alert_note" not in names
-    assert "set_alert_status" not in names
-    assert "add_alert_note" not in handlers
-    assert "set_alert_status" not in handlers
+@pytest.mark.asyncio
+async def test_list_resources(mock_env):
+    server = create_server()
+    result = await server.request_handlers[ListResourcesRequest](
+        ListResourcesRequest(method="resources/list", params=None)
+    )
+    resources = result.root.resources
+    uris = {str(r.uri) for r in resources}
+    assert "ariaops://version" in uris
+    assert "ariaops://adapter-kinds" in uris
 
 
-def test_registry_includes_write_tools_when_enabled():
-    defs, handlers = _build_registry(include_write_operations=True)
-    names = {tool.name for tool in defs}
-    assert "add_alert_note" in names
-    assert "set_alert_status" in names
-    assert "add_alert_note" in handlers
-    assert "set_alert_status" in handlers
+@pytest.mark.asyncio
+async def test_read_resource_version(mock_env):
+    version_data = {"releaseName": "8.18.0", "buildNumber": "12345678"}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(
+            return_value=httpx.Response(200, json=TOKEN_RESPONSE)
+        )
+        respx.get(f"{BASE}/versions/current").mock(
+            return_value=httpx.Response(200, json=version_data)
+        )
+
+        server = create_server()
+        result = await server.request_handlers[ReadResourceRequest](
+            ReadResourceRequest(method="resources/read", params={"uri": "ariaops://version"})
+        )
+
+        contents = result.root.contents
+        assert len(contents) == 1
+        data = json.loads(contents[0].text)
+        assert data["releaseName"] == "8.18.0"
+
+
+@pytest.mark.asyncio
+async def test_read_resource_adapter_kinds(mock_env):
+    adapter_data = {"adapterKindList": [{"key": "VMWARE", "name": "VMware Adapter"}]}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(
+            return_value=httpx.Response(200, json=TOKEN_RESPONSE)
+        )
+        respx.get(f"{BASE}/adapterkinds").mock(
+            return_value=httpx.Response(200, json=adapter_data)
+        )
+
+        server = create_server()
+        result = await server.request_handlers[ReadResourceRequest](
+            ReadResourceRequest(
+                method="resources/read", params={"uri": "ariaops://adapter-kinds"}
+            )
+        )
+
+        contents = result.root.contents
+        assert len(contents) == 1
+        data = json.loads(contents[0].text)
+        assert data["adapterKindList"][0]["key"] == "VMWARE"
+
+
+@pytest.mark.asyncio
+async def test_read_resource_error(mock_env):
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(
+            return_value=httpx.Response(200, json=TOKEN_RESPONSE)
+        )
+        respx.get(f"{BASE}/versions/current").mock(
+            return_value=httpx.Response(503, json={"message": "down"})
+        )
+
+        server = create_server()
+        result = await server.request_handlers[ReadResourceRequest](
+            ReadResourceRequest(method="resources/read", params={"uri": "ariaops://version"})
+        )
+
+        contents = result.root.contents
+        assert len(contents) == 1
+        data = json.loads(contents[0].text)
+        assert "error" in data
+
+
+@pytest.mark.asyncio
+async def test_read_resource_unknown_uri(mock_env):
+    server = create_server()
+    with pytest.raises(ValueError, match="Unknown resource URI"):
+        await server.request_handlers[ReadResourceRequest](
+            ReadResourceRequest(method="resources/read", params={"uri": "ariaops://unknown"})
+        )
+
+
+@pytest.mark.asyncio
+async def test_call_tool_unknown(mock_env):
+    server = create_server()
+    result = await server.request_handlers[CallToolRequest](
+        CallToolRequest(
+            method="tools/call", params={"name": "nonexistent_tool", "arguments": {}}
+        )
+    )
+    assert result.root.isError is True
+    assert "Unknown tool" in result.root.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_call_tool_get_version(mock_env):
+    version_data = {"releaseName": "8.18.0", "buildNumber": "12345678"}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(
+            return_value=httpx.Response(200, json=TOKEN_RESPONSE)
+        )
+        respx.get(f"{BASE}/versions/current").mock(
+            return_value=httpx.Response(200, json=version_data)
+        )
+
+        server = create_server()
+        result = await server.request_handlers[CallToolRequest](
+            CallToolRequest(
+                method="tools/call", params={"name": "get_version", "arguments": {}}
+            )
+        )
+
+        content = result.root.content
+        assert len(content) == 1
+        data = json.loads(content[0].text)
+        assert data["releaseName"] == "8.18.0"

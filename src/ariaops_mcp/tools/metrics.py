@@ -5,10 +5,10 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
-import httpx
 import mcp.types as types
 
 from ariaops_mcp.client import get_client
+from ariaops_mcp.tools._common import format_error
 
 VALID_ROLL_UP_TYPES = {"AVG", "MIN", "MAX", "SUM", "NONE"}
 VALID_INTERVAL_TYPES = {"MINUTES", "HOURS", "DAYS", "WEEKS", "MONTHS"}
@@ -139,12 +139,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 intervalQuantifier=args.get("intervalQuantifier", 1),
             )
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_latest_stats(args: dict) -> str:
         if not args.get("id"):
@@ -155,12 +151,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 statKey=args.get("statKey"),
             )
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def query_stats(args: dict) -> str:
         if not args.get("resourceIds"):
@@ -192,12 +184,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 body["intervalType"] = interval_type
             data = await get_client().post("/resources/stats/query", body)
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def query_latest_stats(args: dict) -> str:
         if not args.get("resourceIds"):
@@ -211,12 +199,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             }
             data = await get_client().post("/resources/stats/latest/query", body)
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_stat_keys(args: dict) -> str:
         if not args.get("id"):
@@ -224,12 +208,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         try:
             data = await get_client().get(f"/resources/{quote(args['id'], safe='')}/statkeys")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_top_n_stats(args: dict) -> str:
         if not args.get("id"):
@@ -241,12 +221,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 topN=args.get("topN", 5),
             )
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def list_properties_latest(args: dict) -> str:
         if not args.get("resourceIds"):
@@ -259,12 +235,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 body["propertyKey"] = [{"key": k} for k in args["propertyKeys"]]
             data = await get_client().post("/resources/properties/latest/query", body)
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     return {
         "get_resource_stats": get_resource_stats,

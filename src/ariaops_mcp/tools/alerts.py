@@ -5,11 +5,10 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
-import httpx
 import mcp.types as types
 
 from ariaops_mcp.client import get_client
-from ariaops_mcp.tools._common import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, apply_response_shaping, truncate_list_response
+from ariaops_mcp.tools._common import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, format_error, truncate_list_response
 
 VALID_STATUS = {"ACTIVE", "CANCELLED", "SUSPENDED"}
 VALID_CRITICALITY = {"CRITICAL", "IMMEDIATE", "WARNING", "INFORMATION"}
@@ -41,16 +40,6 @@ def tool_definitions() -> list[types.Tool]:
                         "minimum": 1,
                         "maximum": PAGE_SIZE_MAX,
                     },
-                    "fields": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Return only these top-level fields per item to reduce payload size.",
-                    },
-                    "summaryOnly": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "When true, return only key identifying fields per item (compact mode).",
-                    },
                 },
             },
         ),
@@ -79,16 +68,6 @@ def tool_definitions() -> list[types.Tool]:
                         "minimum": 1,
                         "maximum": PAGE_SIZE_MAX,
                     },
-                    "fields": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Return only these top-level fields per item to reduce payload size.",
-                    },
-                    "summaryOnly": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "When true, return only key identifying fields per item (compact mode).",
-                    },
                 },
             },
         ),
@@ -113,16 +92,6 @@ def tool_definitions() -> list[types.Tool]:
                         "default": PAGE_SIZE_DEFAULT,
                         "minimum": 1,
                         "maximum": PAGE_SIZE_MAX,
-                    },
-                    "fields": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Return only these top-level fields per item to reduce payload size.",
-                    },
-                    "summaryOnly": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "When true, return only key identifying fields per item (compact mode).",
                     },
                 },
             },
@@ -165,19 +134,10 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 page=page,
                 pageSize=page_size,
             )
-            data = truncate_list_response(data, "alerts", page=page, page_size=page_size)
-            data = apply_response_shaping(
-                data, "alerts",
-                fields=args.get("fields"),
-                summary_only=bool(args.get("summaryOnly", False)),
-            )
+            data = truncate_list_response(data, "alerts")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_alert(args: dict) -> str:
         if not args.get("id"):
@@ -185,12 +145,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         try:
             data = await get_client().get(f"/alerts/{quote(args['id'], safe='')}")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def query_alerts(args: dict) -> str:
         try:
@@ -209,19 +165,10 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 page=page,
                 pageSize=page_size,
             )
-            data = truncate_list_response(data, "alerts", page=page, page_size=page_size)
-            data = apply_response_shaping(
-                data, "alerts",
-                fields=args.get("fields"),
-                summary_only=bool(args.get("summaryOnly", False)),
-            )
+            data = truncate_list_response(data, "alerts")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_alert_notes(args: dict) -> str:
         if not args.get("id"):
@@ -229,12 +176,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         try:
             data = await get_client().get(f"/alerts/{quote(args['id'], safe='')}/notes")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def list_alert_definitions(args: dict) -> str:
         try:
@@ -245,19 +188,10 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 page=page,
                 pageSize=page_size,
             )
-            data = truncate_list_response(data, "alertDefinitions", page=page, page_size=page_size)
-            data = apply_response_shaping(
-                data, "alertDefinitions",
-                fields=args.get("fields"),
-                summary_only=bool(args.get("summaryOnly", False)),
-            )
+            data = truncate_list_response(data, "alertDefinitions")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_alert_definition(args: dict) -> str:
         if not args.get("id"):
@@ -265,23 +199,15 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         try:
             data = await get_client().get(f"/alertdefinitions/{quote(args['id'], safe='')}")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     async def get_contributing_symptoms(args: dict) -> str:
         try:
             data = await get_client().get("/alerts/contributingsymptoms")
             return json.dumps(data, indent=2)
-        except httpx.HTTPStatusError as e:
-            return json.dumps({"error": str(e), "status_code": e.response.status_code, "detail": e.response.text[:500]})
-        except httpx.HTTPError as e:
-            return json.dumps({"error": "Network error", "detail": str(e)})
         except Exception as e:
-            return json.dumps({"error": "Unexpected error", "detail": str(e)})
+            return format_error(e)
 
     return {
         "list_alerts": list_alerts,

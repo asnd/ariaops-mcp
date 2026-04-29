@@ -1,9 +1,17 @@
 """Shared pytest fixtures."""
 
+import os
+
 import pytest
 
 from ariaops_mcp import client as client_module
 from ariaops_mcp.config import get_settings
+
+# Set default test env vars at module level so that modules which
+# trigger Settings() at import time (e.g. server.py) can be collected.
+os.environ.setdefault("ARIAOPS_HOST", "vrops.test.local")
+os.environ.setdefault("ARIAOPS_USERNAME", "testuser")
+os.environ.setdefault("ARIAOPS_PASSWORD", "testpass")
 
 
 @pytest.fixture(autouse=True)
