@@ -1,4 +1,4 @@
-"""Aria Operations HTTP client with token lifecycle management."""
+"""Aria Operations HTTP client with token lifecycle management and resilience."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from ariaops_mcp.circuit_breaker import CircuitBreaker
 from ariaops_mcp.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -21,10 +22,23 @@ _BASE_BACKOFF_SECS = 0.5
 
 class AriaOpsClient:
     def __init__(self) -> None:
+        settings = get_settings()
         self._token: str | None = None
         self._token_expiry: float = 0.0
         self._http: httpx.AsyncClient | None = None
         self._token_lock = asyncio.Lock()
+        self._semaphore = asyncio.Semaphore(settings.max_concurrent_requests)
+        self._circuit_breaker = CircuitBreaker(
+            failure_threshold=settings.cb_failure_threshold,
+            recovery_timeout=settings.cb_recovery_timeout,
+            success_threshold=settings.cb_success_threshold,
+        )
+        self._request_deadline = settings.request_deadline
+
+    @property
+    def circuit_breaker(self) -> CircuitBreaker:
+        """Expose circuit breaker for testing and observability."""
+        return self._circuit_breaker
 
     async def _get_http(self) -> httpx.AsyncClient:
         if self._http is None:
@@ -63,6 +77,11 @@ class AriaOpsClient:
             validity_ms = data.get("validity")
             self._token_expiry = validity_ms / 1000.0 if validity_ms else time.time() + 3600
             logger.debug("Token acquired, expires at %s", self._token_expiry)
+
+    def _invalidate_token(self) -> None:
+        """Clear cached token so next request triggers reacquisition."""
+        self._token = None
+        self._token_expiry = 0.0
 
     async def _request_with_retry(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         http = await self._get_http()
@@ -130,9 +149,26 @@ class AriaOpsClient:
         raise RuntimeError(f"Request failed unexpectedly: {method} {path}")
 
     async def _authed_request(
-        self, method: str, path: str, body: dict[str, Any] | None = None, **params: Any
+        self, method: str, path: str, body: dict[str, Any] | None = None, response_type: str = "json", **params: Any
     ) -> Any:
-        """Shared helper: ensures token, makes request, returns parsed JSON."""
+        """Shared helper: ensures token, makes request with resilience.
+        
+        Args:
+            response_type: Either "json" (default) or "content" for raw bytes.
+        """
+        # Circuit breaker gate — fails fast if backend is known-down
+        self._circuit_breaker.check()
+
+        # Concurrency limiter — blocks cooperatively if too many parallel requests
+        async with self._semaphore:
+            # Overall request deadline — caps total wall-clock time including retries
+            async with asyncio.timeout(self._request_deadline):
+                return await self._authed_request_inner(method, path, body, response_type, **params)
+
+    async def _authed_request_inner(
+        self, method: str, path: str, body: dict[str, Any] | None = None, response_type: str = "json", **params: Any
+    ) -> Any:
+        """Inner implementation: token management, 401 re-auth, circuit breaker recording."""
         await self._ensure_token()
         start = time.monotonic()
         kwargs: dict[str, Any] = {
@@ -141,9 +177,38 @@ class AriaOpsClient:
         }
         if body is not None:
             kwargs["json"] = body
-        resp = await self._request_with_retry(method, path, **kwargs)
+
+        try:
+            resp = await self._request_with_retry(method, path, **kwargs)
+        except httpx.HTTPStatusError as exc:
+            # 401 Unauthorized — invalidate token and retry once
+            if exc.response.status_code == 401:
+                logger.warning("Received 401, invalidating token and reacquiring")
+                self._invalidate_token()
+                await self._ensure_token()
+                kwargs["headers"] = {"Authorization": f"vRealizeOpsToken {self._token}"}
+                try:
+                    resp = await self._request_with_retry(method, path, **kwargs)
+                except Exception:
+                    self._circuit_breaker.record_failure()
+                    raise
+            else:
+                # 4xx (non-retryable) do NOT trip the circuit breaker
+                if exc.response.status_code >= 500:
+                    self._circuit_breaker.record_failure()
+                raise
+        except (httpx.HTTPError, TimeoutError, OSError):
+            # Network/timeout errors count as circuit failures
+            self._circuit_breaker.record_failure()
+            raise
+
         duration_ms = (time.monotonic() - start) * 1000
         logger.debug("%s %s -> %s (%.0fms)", method, path, resp.status_code, duration_ms)
+        self._circuit_breaker.record_success()
+
+        # Return raw bytes or JSON based on response_type
+        if response_type == "content":
+            return resp.content
         # Some mutating endpoints return 204 No Content
         if resp.status_code == 204 or not resp.content:
             return {}
@@ -162,13 +227,8 @@ class AriaOpsClient:
         return await self._authed_request("DELETE", path, body, **params)
 
     async def get_bytes(self, path: str) -> bytes:
-        await self._ensure_token()
-        resp = await self._request_with_retry(
-            "GET",
-            path,
-            headers={"Authorization": f"vRealizeOpsToken {self._token}"},
-        )
-        return resp.content
+        """Fetch raw bytes (e.g., report downloads). Delegates to _authed_request."""
+        return await self._authed_request("GET", path, response_type="content")
 
     async def close(self) -> None:
         if self._token and self._http:

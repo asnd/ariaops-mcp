@@ -2,16 +2,16 @@
 
 import asyncio
 import json
-import logging
 import signal
 
 from ariaops_mcp.config import get_settings
+from ariaops_mcp.logging_config import configure_logging
 from ariaops_mcp.server import create_server
 
 
 def main() -> None:
     s = get_settings()
-    logging.basicConfig(level=s.log_level)
+    configure_logging(level=s.log_level, fmt=s.log_format)
 
     server = create_server()
 
@@ -31,8 +31,10 @@ def main() -> None:
                 try:
                     from ariaops_mcp.client import get_client
 
-                    await get_client().get("/versions/current")
-                    body = json.dumps({"status": "ok"}).encode()
+                    client = get_client()
+                    cb_state = client.circuit_breaker.state.value
+                    await client.get("/versions/current")
+                    body = json.dumps({"status": "ok", "circuit_breaker": cb_state}).encode()
                     status = 200
                 except Exception as e:
                     body = json.dumps({"status": "degraded", "detail": str(e)}).encode()

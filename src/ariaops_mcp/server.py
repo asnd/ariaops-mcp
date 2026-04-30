@@ -1,14 +1,20 @@
 """MCP server setup and tool registration."""
 
 import json
+import logging
+import time
 from typing import cast
 
 import mcp.types as types
 from mcp.server import Server
 from pydantic import AnyUrl
 
+from ariaops_mcp.circuit_breaker import CircuitOpenError
 from ariaops_mcp.config import get_settings
+from ariaops_mcp.logging_config import new_correlation_id
 from ariaops_mcp.tools import alerts, capacity, discovery, metrics, reports, resources, write_ops
+
+logger = logging.getLogger(__name__)
 
 READ_ONLY_MODULES = [resources, alerts, metrics, capacity, reports, discovery]
 
@@ -37,10 +43,36 @@ def create_server() -> Server:
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict | None) -> list[types.TextContent]:
+        cid = new_correlation_id()
+        start = time.monotonic()
         handler = _TOOL_HANDLERS.get(name)
         if not handler:
             raise ValueError(f"Unknown tool: {name}")
-        result = await handler(arguments or {})
+
+        try:
+            result = await handler(arguments or {})
+        except CircuitOpenError as e:
+            result = json.dumps({
+                "error": "Service unavailable",
+                "detail": str(e),
+                "retry_after": e.retry_after,
+                "correlation_id": cid,
+            })
+        except TimeoutError:
+            result = json.dumps({
+                "error": "Request deadline exceeded",
+                "detail": f"Total time exceeded {get_settings().request_deadline}s including retries",
+                "correlation_id": cid,
+            })
+
+        duration_ms = (time.monotonic() - start) * 1000
+        logger.info(
+            "tool_call: %s [%s] %.0fms",
+            name,
+            cid,
+            duration_ms,
+            extra={"event": "tool_call", "tool": name, "duration_ms": duration_ms},
+        )
         return [types.TextContent(type="text", text=result)]
 
     @server.list_resources()
