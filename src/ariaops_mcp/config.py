@@ -81,4 +81,5 @@ def reset_settings_override(token: Token[Settings | None]) -> None:
     _settings_override.reset(token)
 
 
-get_settings.cache_clear = _get_cached_settings.cache_clear  # type: ignore[attr-defined]
+def clear_settings_cache() -> None:
+    _get_cached_settings.cache_clear()

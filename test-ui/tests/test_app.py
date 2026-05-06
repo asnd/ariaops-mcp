@@ -496,6 +496,33 @@ class TestInitAriaops:
         assert session["ariaops"]["ready"] is True
         assert app._ariaops_ready is False
 
+    @pytest.mark.asyncio
+    async def test_init_uses_supplied_settings_for_client_creation(self):
+        from ariaops_mcp.config import get_settings
+
+        session = _new_session_state()
+        captured: dict[str, str] = {}
+        fake_tool = MagicMock(name="tool")
+        fake_tool.name = "demo_tool"
+        fake_tool.description = "demo"
+        fake_tool.inputSchema = {"type": "object"}
+
+        class FakeClient:
+            def __init__(self):
+                captured["host"] = get_settings().host
+
+            async def close(self):
+                return None
+
+        with (
+            patch("ariaops_mcp.client.AriaOpsClient", FakeClient),
+            patch("ariaops_mcp.server._build_registry", return_value=([fake_tool], {"demo_tool": MagicMock()})),
+        ):
+            result = await init_ariaops("vrops.example.com", "admin", "secret", session_state=session)
+
+        assert "Connected" in result
+        assert captured["host"] == "vrops.example.com"
+
 
 # ─── chat_fn ──────────────────────────────────────────────────────────────────
 

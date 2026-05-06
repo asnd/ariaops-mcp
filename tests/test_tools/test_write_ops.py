@@ -68,8 +68,8 @@ def test_write_tools_absent_from_server_when_disabled(mock_env):
 
 def test_write_tools_present_when_enabled(mock_env, monkeypatch):
     monkeypatch.setenv("ARIAOPS_ENABLE_WRITE_OPERATIONS", "true")
-    from ariaops_mcp.config import get_settings
-    get_settings.cache_clear()
+    from ariaops_mcp.config import clear_settings_cache
+    clear_settings_cache()
     from ariaops_mcp.server import _build_registry
 
     defs, _ = _build_registry()
