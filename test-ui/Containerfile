@@ -1,0 +1,41 @@
+# Build stage: build the ariaops-mcp wheel
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+COPY pyproject.toml README.md ./
+COPY src/ src/
+RUN pip install --no-cache-dir build && python -m build --wheel
+
+# Runtime stage
+FROM python:3.11-slim
+
+LABEL org.opencontainers.image.title="ariaops-mcp-ui"
+LABEL org.opencontainers.image.description="Gradio chatbot UI for AriaOps MCP server"
+
+RUN useradd --system --no-create-home --uid 1001 appuser
+
+WORKDIR /app
+
+# install ariaops-mcp wheel
+COPY --from=builder /build/dist/*.whl ./
+RUN pip install --no-cache-dir *.whl && rm *.whl
+
+# install UI dependencies
+COPY test-ui/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt && rm requirements.txt
+
+COPY test-ui/app.py .
+
+USER appuser
+
+ENV GRADIO_SERVER_NAME=0.0.0.0
+ENV GRADIO_SERVER_PORT=7860
+ENV PYTHONUNBUFFERED=1
+
+# Gradio UI + Azure SSO callback ports
+EXPOSE 7860 7777 8888 9999
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:7860/')" || exit 1
+
+ENTRYPOINT ["python", "app.py"]
