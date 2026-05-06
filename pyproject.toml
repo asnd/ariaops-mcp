@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ariaops-mcp"
 version = "0.1.0"
-description = "Read-only MCP server for VMware Aria Operations (on-prem)"
+description = "MCP server for VMware Aria Operations (on-prem) with opt-in write operations"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

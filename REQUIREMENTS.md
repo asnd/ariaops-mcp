@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-A **read-only** Model Context Protocol (MCP) server that exposes VMware Aria Operations (on-prem) REST API capabilities as MCP tools. This enables AI assistants (Claude, etc.) to query infrastructure health, alerts, metrics, capacity, and reports through a standardized interface.
+A Model Context Protocol (MCP) server that exposes VMware Aria Operations (on-prem) REST API capabilities as MCP tools. This enables AI assistants (Claude, etc.) to query infrastructure health, alerts, metrics, capacity, and reports through a standardized interface, with write operations available only when explicitly enabled.
 
 **Base API:** `https://<vrops-host>/suite-api/api/`
 **API Version target:** 8.x (8.12–8.18+, compatible with Aria Operations on-prem)
@@ -49,7 +49,7 @@ Response: { "token": "...", "validity": 1234567890, "expiresAt": "..." }
 
 ## 4. MCP Tools — Functional Scope
 
-All tools are **read-only**. Organized by domain.
+Read-only tools are always available. Mutating tools are exposed only when `ARIAOPS_ENABLE_WRITE_OPERATIONS=true`. Organized by domain.
 
 ### 4.1 Resources
 
@@ -126,6 +126,30 @@ Aria Operations doesn't have a dedicated `/api/capacity` endpoint — capacity d
 | `list_symptoms`        | `GET /api/symptomdefinitions`   | List symptom definitions |
 | `list_recommendations` | `GET /api/recommendations`      | List recommendations |
 | `list_supermetrics`    | `GET /api/supermetrics`         | List super metrics |
+
+### 4.7 Write Operations (opt-in)
+
+These tools are disabled by default and must only be registered when `ARIAOPS_ENABLE_WRITE_OPERATIONS=true`.
+
+| Tool Name                     | API Endpoint / Logic                                 | Description |
+|------------------------------|------------------------------------------------------|-------------|
+| `modify_alerts`              | `POST /api/alerts`                                   | Bulk cancel, suspend, or acknowledge alerts |
+| `add_alert_note`             | `POST /api/alerts/{id}/notes`                        | Add a note to an alert |
+| `delete_alert_note`          | `DELETE /api/alerts/{id}/notes/{noteId}`             | Delete a note from an alert |
+| `delete_canceled_alerts`     | `DELETE /api/alerts`                                 | Delete canceled alerts matching filters |
+| `mark_resources_maintained`  | `POST /api/resources/maintained`                     | Put resources into maintenance mode |
+| `unmark_resources_maintained`| `DELETE /api/resources/maintained`                   | Remove resources from maintenance mode |
+| `create_maintenance_schedule`| `POST /api/maintenanceschedules`                     | Create a maintenance schedule |
+| `update_maintenance_schedule`| `PUT /api/maintenanceschedules/{id}`                 | Update a maintenance schedule |
+| `delete_maintenance_schedule`| `DELETE /api/maintenanceschedules`                   | Delete one or more maintenance schedules |
+| `generate_report`            | `POST /api/reports`                                  | Generate a report from a report definition |
+| `delete_report`              | `DELETE /api/reports/{id}`                           | Delete a generated report |
+| `create_report_schedule`     | `POST /api/reportdefinitions/{id}/schedules`         | Create a report schedule |
+| `update_report_schedule`     | `PUT /api/reportdefinitions/{id}/schedules/{sid}`    | Update a report schedule |
+| `delete_report_schedule`     | `DELETE /api/reportdefinitions/{id}/schedules/{sid}` | Delete a report schedule |
+| `create_resource`            | `POST /api/resources`                                | Create a new resource |
+| `update_resource`            | `PUT /api/resources/{id}`                            | Update resource metadata |
+| `delete_resources`           | `DELETE /api/resources`                              | Delete one or more resources |
 
 ---
 

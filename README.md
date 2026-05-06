@@ -70,6 +70,44 @@ podman build --format docker -t ariaops-mcp .
 podman run --env-file .env -p 8080:8080 ariaops-mcp
 ```
 
+## MCP Architecture
+
+```text
++---------------------------+     MCP (stdio / streamable HTTP)     +---------------------------+
+| MCP Client / AI Assistant | <-----------------------------------> | ariaops-mcp server        |
+| Claude Desktop, IDE, etc. |                                       |                           |
++-------------+-------------+                                       |  read tools: always on    |
+              |                                                     |  write tools: opt-in      |
+              |                                                     +-------------+-------------+
+              |                                                                   |
+              |                                                                   | HTTPS REST
+              |                                                                   v
+              |                                                     +---------------------------+
+              +---------------------------------------------------> | VMware Aria Operations   |
+                                                                    | /suite-api/api/...       |
+                                                                    +---------------------------+
+```
+
+```text
++-----------------------+      chat / tool plans      +-----------------------+
+| Browser               | <-------------------------> | test-ui/app.py        |
+| Gradio test UI        |                             | Gradio + tool bridge  |
++-----------+-----------+                             +-----+-----------+-----+
+            |                                               |           |
+            |                                               |           |
+            |                                    LLM Gateway |           | in-process MCP tools
+            v                                               v           v
+  +-------------------+                           +----------------+  +----------------------+
+  | Human operator    |                           | OpenAI-compat  |  | ariaops_mcp modules  |
+  +-------------------+                           | model gateway  |  | + AriaOpsClient      |
+                                                  +----------------+  +----------+-----------+
+                                                                                  |
+                                                                                  v
+                                                                       +----------------------+
+                                                                       | VMware Aria Ops      |
+                                                                       +----------------------+
+```
+
 ## MCP Client Integration
 
 Add to your MCP config (e.g. `~/.claude/mcp_settings.json` for AI code assistants):
@@ -115,12 +153,30 @@ Full tool catalog: [`TOOLS.md`](TOOLS.md)
 
 Full spec: [`REQUIREMENTS.md`](REQUIREMENTS.md)
 
+## Test UI App
+
+The repo includes a Gradio-based test UI in [`test-ui/`](test-ui) for exercising the same tool handlers in-process while routing chat through an LLM gateway.
+
+```bash
+python -m pip install -r test-ui/requirements.txt
+python test-ui/app.py --port 7860
+```
+
+To run its automated tests:
+
+```bash
+cd test-ui
+pytest tests
+```
+
 ## Development
 
 ```bash
 pip install -e ".[dev]"
 pytest                  # run tests
 ruff check src/ tests/  # lint
+pyright                 # type-check
+cd test-ui && pytest tests
 ```
 
 ## Configuration Reference
