@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir build && python -m build --wheel
 FROM python:3.11-slim
 
 LABEL org.opencontainers.image.title="ariaops-mcp"
-LABEL org.opencontainers.image.description="Read-only MCP server for VMware Aria Operations"
+LABEL org.opencontainers.image.description="MCP server for VMware Aria Operations with opt-in write operations"
 LABEL org.opencontainers.image.source="https://github.com/asnd/ariaops-mcp"
 
 RUN useradd --system --no-create-home --uid 1001 mcpuser

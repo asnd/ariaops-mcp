@@ -525,8 +525,8 @@ async def init_ariaops(
 
     try:
         import ariaops_mcp.client as client_mod
-        from ariaops_mcp.config import Settings
-        from ariaops_mcp.server import _TOOL_DEFS, _TOOL_HANDLERS
+        import ariaops_mcp.server as server_mod
+        from ariaops_mcp.config import Settings, reset_settings_override, set_settings_override
 
         state = _ensure_session_state(session_state)
         ariaops_state = _session_ariaops_state(state)
@@ -543,7 +543,12 @@ async def init_ariaops(
             auth_source=(auth_source or "local").strip(),
             verify_ssl=verify_ssl,
         )
-        client = client_mod.AriaOpsClient()
+        settings_token = set_settings_override(settings)
+        try:
+            client = client_mod.AriaOpsClient()
+            tool_defs, tool_handlers = server_mod._build_registry()
+        finally:
+            reset_settings_override(settings_token)
         tools = [
             {
                 "type": "function",
@@ -553,9 +558,9 @@ async def init_ariaops(
                     "parameters": t.inputSchema,
                 },
             }
-            for t in _TOOL_DEFS
+            for t in tool_defs
         ]
-        handlers = dict(_TOOL_HANDLERS)
+        handlers = dict(tool_handlers)
 
         ariaops_state.update(
             {

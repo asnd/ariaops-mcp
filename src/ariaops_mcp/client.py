@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from contextvars import ContextVar, Token
 from typing import Any
 
 import httpx
@@ -247,10 +248,22 @@ class AriaOpsClient:
 
 # Module-level singleton
 _client: AriaOpsClient | None = None
+_client_override: ContextVar[AriaOpsClient | None] = ContextVar("ariaops_client_override", default=None)
 
 
 def get_client() -> AriaOpsClient:
+    override = _client_override.get()
+    if override is not None:
+        return override
     global _client
     if _client is None:
         _client = AriaOpsClient()
     return _client
+
+
+def set_client_override(client: AriaOpsClient) -> Token[AriaOpsClient | None]:
+    return _client_override.set(client)
+
+
+def reset_client_override(token: Token[AriaOpsClient | None]) -> None:
+    _client_override.reset(token)

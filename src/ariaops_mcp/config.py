@@ -1,5 +1,6 @@
 """Configuration loaded from environment variables."""
 
+from contextvars import ContextVar, Token
 from functools import lru_cache
 from typing import Literal
 
@@ -57,6 +58,28 @@ class Settings(BaseSettings):
         return f"https://{self.host}/suite-api/api"
 
 
+_settings_override: ContextVar[Settings | None] = ContextVar("ariaops_settings_override", default=None)
+
+
 @lru_cache(maxsize=1)
-def get_settings() -> Settings:
+def _get_cached_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]
+
+
+def get_settings() -> Settings:
+    override = _settings_override.get()
+    if override is not None:
+        return override
+    return _get_cached_settings()
+
+
+def set_settings_override(settings: Settings) -> Token[Settings | None]:
+    return _settings_override.set(settings)
+
+
+def reset_settings_override(token: Token[Settings | None]) -> None:
+    _settings_override.reset(token)
+
+
+def clear_settings_cache() -> None:
+    _get_cached_settings.cache_clear()

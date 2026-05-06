@@ -5,7 +5,7 @@ import os
 import pytest
 
 from ariaops_mcp import client as client_module
-from ariaops_mcp.config import get_settings
+from ariaops_mcp.config import clear_settings_cache
 
 # Set default test env vars at module level so that modules which
 # trigger Settings() at import time (e.g. server.py) can be collected.
@@ -18,7 +18,7 @@ os.environ.setdefault("ARIAOPS_PASSWORD", "testpass")
 def reset_client():
     """Reset the module-level client singleton and settings cache before each test."""
     client_module._client = None
-    get_settings.cache_clear()
+    clear_settings_cache()
     yield
     client_module._client = None
 
