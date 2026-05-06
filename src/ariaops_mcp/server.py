@@ -19,13 +19,21 @@ logger = logging.getLogger(__name__)
 READ_ONLY_MODULES = [resources, alerts, metrics, capacity, reports, discovery]
 
 
+def _write_operations_enabled() -> bool:
+    try:
+        return get_settings().enable_write_operations
+    except Exception:
+        logger.debug("Settings unavailable while building tool registry; defaulting write operations to disabled.")
+        return False
+
+
 def _build_registry() -> tuple[list[types.Tool], dict]:
     defs: list[types.Tool] = []
     handlers: dict = {}
     for mod in READ_ONLY_MODULES:
         defs.extend(mod.tool_definitions())
         handlers.update(mod.tool_handlers())
-    if get_settings().enable_write_operations:
+    if _write_operations_enabled():
         defs.extend(write_ops.tool_definitions())
         handlers.update(write_ops.tool_handlers())
     return defs, handlers
