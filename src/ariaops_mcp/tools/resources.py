@@ -8,7 +8,12 @@ from urllib.parse import quote
 import mcp.types as types
 
 from ariaops_mcp.client import get_client
-from ariaops_mcp.tools._common import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, format_error, truncate_list_response
+from ariaops_mcp.tools._common import (
+    PAGE_SIZE_DEFAULT,
+    PAGE_SIZE_MAX,
+    format_error,
+    truncate_list_response,
+)
 
 VALID_RELATIONSHIP_TYPES = {"PARENT", "CHILD", "ALL"}
 
@@ -204,6 +209,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
     async def list_adapter_kinds(args: dict) -> str:
         try:
             data = await get_client().get("/adapterkinds")
+            data = truncate_list_response(data, "adapter-kind")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
@@ -213,6 +219,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             return json.dumps({"error": "Missing required argument: adapterKindKey"})
         try:
             data = await get_client().get(f"/adapterkinds/{quote(args['adapterKindKey'], safe='')}/resourcekinds")
+            data = truncate_list_response(data, "resource-kind")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)

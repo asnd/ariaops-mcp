@@ -59,7 +59,6 @@ def tool_definitions() -> list[types.Tool]:
                         "default": "ClusterComputeResource",
                         "description": "e.g. ClusterComputeResource, Datastore, HostSystem",
                     },
-                    "pageSize": {"type": "integer", "default": 20},
                 },
             },
         ),
@@ -157,21 +156,33 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             client = get_client()
             adapter_kind = args.get("adapterKind", "VMWARE")
             resource_kind = args.get("resourceKind", "ClusterComputeResource")
-            page_size = args.get("pageSize", 20)
 
-            resources_data = await client.get(
-                "/resources",
-                adapterKind=adapter_kind,
-                resourceKind=resource_kind,
-                pageSize=page_size,
-            )
+            # Iterate all pages to collect every resource of this kind
+            all_resource_ids: list[str] = []
+            page = 0
+            page_size = 50
+            while True:
+                resources_data = await client.get(
+                    "/resources",
+                    adapterKind=adapter_kind,
+                    resourceKind=resource_kind,
+                    page=page,
+                    pageSize=page_size,
+                )
+                resource_list = resources_data.get("resourceList", [])
+                all_resource_ids.extend(r["identifier"] for r in resource_list)
 
-            resource_ids = [r["identifier"] for r in resources_data.get("resourceList", [])]
-            if not resource_ids:
+                page_info = resources_data.get("pageInfo", {})
+                total_count = page_info.get("totalCount", len(resource_list))
+                if (page + 1) * page_size >= total_count or not resource_list:
+                    break
+                page += 1
+
+            if not all_resource_ids:
                 return json.dumps({"message": "No resources found", "resourceKind": resource_kind})
 
             body = {
-                "resourceId": [{"resourceId": rid} for rid in resource_ids],
+                "resourceId": [{"resourceId": rid} for rid in all_resource_ids],
                 "statKey": [{"key": k} for k in CAPACITY_STAT_KEYS],
             }
             stats_data = await client.post("/resources/stats/latest/query", body)
@@ -179,7 +190,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             return json.dumps(
                 {
                     "resourceKind": resource_kind,
-                    "resourceCount": len(resource_ids),
+                    "resourceCount": len(all_resource_ids),
                     "capacityStats": stats_data,
                 },
                 indent=2,

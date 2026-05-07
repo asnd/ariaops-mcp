@@ -33,6 +33,7 @@ from typing import Any
 import gradio as gr
 import requests
 import urllib3
+from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -40,8 +41,12 @@ urllib3.disable_warnings()
 
 # ─── paths ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).parent
-REPO_SRC = SCRIPT_DIR.parent / "src"
+REPO_ROOT = SCRIPT_DIR.parent
+REPO_SRC = REPO_ROOT / "src"
 sys.path.insert(0, str(REPO_SRC))
+
+# Load .env from repo root so ARIAOPS_* and LITELLM_* vars are available
+load_dotenv(REPO_ROOT / ".env", override=False)
 
 # ─── constants ─────────────────────────────────────────────────────────────────
 DEFAULT_GATEWAY_URL = os.environ.get("LITELLM_BASE_URL", "")
@@ -50,7 +55,10 @@ PREFERRED_MODELS = ["nemotron-3-super-120b", "nemotron", "llama", "mistral"]
 CHAT_MODES = {"chat", "responses"}
 # Only show models hosted on internal infrastructure (hosted_vllm = vLLM, gpt-oss = OSS via OpenAI-compat)
 HOSTED_PROVIDERS = {"hosted_vllm", "gpt-oss"}
-MAX_TOOL_ROUNDS = 10
+MAX_TOOL_ROUNDS = 50
+# Maximum characters per tool result included in conversation history.
+# Larger results are truncated to avoid exceeding LLM gateway payload limits (nginx 413).
+MAX_TOOL_RESULT_CHARS = 4000
 
 SYSTEM_PROMPT_DEFAULT = (
     "You are an AI assistant with access to VMware Aria Operations (vROps). "
@@ -733,12 +741,17 @@ async def _agentic_loop(
             result = await _call_mcp_tool_for_state(tool_name, args, session_state)
             tool_calls_md += _tool_call_md(tool_name, args, result, show_tools)
 
+            # Truncate large results to stay within LLM gateway payload limits
+            content_for_llm = result
+            if len(content_for_llm) > MAX_TOOL_RESULT_CHARS:
+                content_for_llm = content_for_llm[:MAX_TOOL_RESULT_CHARS] + "\n... [truncated]"
+
             tool_results.append(
                 {
                     "role": "tool",
                     "tool_call_id": tc.get("id", ""),
                     "name": tool_name,
-                    "content": result,
+                    "content": content_for_llm,
                 }
             )
 

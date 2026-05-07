@@ -9,8 +9,8 @@ from ariaops_mcp.config import get_settings
 from ariaops_mcp.logging_config import get_correlation_id
 
 PAGE_SIZE_DEFAULT = 50
-PAGE_SIZE_MAX = 200
-MAX_LIST_ITEMS = 50
+PAGE_SIZE_MAX = 50
+MAX_LIST_ITEMS = 20
 
 
 def truncate_list_response(data: dict, list_key: str) -> dict:
