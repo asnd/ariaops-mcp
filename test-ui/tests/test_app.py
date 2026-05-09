@@ -622,7 +622,9 @@ class TestOAuthFlow:
             server.server_close()
 
     @pytest.mark.asyncio
-    async def test_fetch_token_stream_bind_failure_returns_message(self):
+    async def test_fetch_token_stream_bind_failure_returns_message(self, monkeypatch):
+        monkeypatch.setenv("AZURE_TENANT_ID", "tenant-123")
+        monkeypatch.setenv("AZURE_CLIENT_ID", "client-456")
         with patch("app._start_callback_server", side_effect=OSError("busy")):
             gen = fetch_token_stream(_new_session_state())
             first = await anext(gen)
