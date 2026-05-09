@@ -785,8 +785,11 @@ class TestBuildAuthUrl:
         assert "%2Fcallback" in url or "/callback" in url
 
     def test_missing_config_raises(self):
-        with pytest.raises(RuntimeError, match="Azure SSO is not configured"):
+        with pytest.raises(RuntimeError) as excinfo:
             _build_auth_url(9999)
+        message = str(excinfo.value)
+        assert "AZURE_TENANT_ID" in message
+        assert "AZURE_CLIENT_ID" in message
 
 
 # ─── _find_free_port ──────────────────────────────────────────────────────────
