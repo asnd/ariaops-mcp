@@ -259,8 +259,6 @@ def apply_manual_token(token_text: str, session_state: dict[str, Any] | None = N
 # Proxy note: the browser handles its own proxy for Azure AD. Python does not
 # make direct HTTP calls to Azure AD — all auth is browser-redirect based.
 
-_AZURE_TENANT_ID = "05764a73-8c6f-4538-83cd-413f1e1b5665"
-_AZURE_CLIENT_ID = "8bce86e2-607e-402d-87eb-4cff2463e6f7"
 _AZURE_SCOPES = (
     "openid profile email offline_access "
     "https://graph.microsoft.com/GroupMember.Read.All "
@@ -284,21 +282,34 @@ def _find_free_port() -> int | None:
     return None
 
 
+def _azure_sso_config() -> tuple[str, str]:
+    tenant_id = os.environ.get("AZURE_TENANT_ID", "").strip()
+    client_id = os.environ.get("AZURE_CLIENT_ID", "").strip()
+    missing = []
+    if not tenant_id:
+        missing.append("AZURE_TENANT_ID")
+    if not client_id:
+        missing.append("AZURE_CLIENT_ID")
+    if missing:
+        missing_str = ", ".join(missing)
+        raise RuntimeError(f"Azure SSO is not configured. Set {missing_str} before using browser sign-in.")
+    return tenant_id, client_id
+
+
 def _build_auth_url(port: int, state: str | None = None, nonce: str | None = None) -> str:
+    tenant_id, client_id = _azure_sso_config()
     redirect_uri = f"http://localhost:{port}{_AZURE_CALLBACK_PATH}"
     params = {
-        "client_id": _AZURE_CLIENT_ID,
+        "client_id": client_id,
         "response_type": "id_token",
         "redirect_uri": redirect_uri,
         "response_mode": "fragment",
         "scope": _AZURE_SCOPES,
         "state": state or secrets.token_urlsafe(24),
         "nonce": nonce or secrets.token_urlsafe(24),
-        "audience": _AZURE_CLIENT_ID,
+        "audience": client_id,
     }
-    return f"https://login.microsoftonline.com/{_AZURE_TENANT_ID}/oauth2/v2.0/authorize?" + urllib.parse.urlencode(
-        params
-    )
+    return f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize?" + urllib.parse.urlencode(params)
 
 
 @dataclass
@@ -415,6 +426,11 @@ def _start_callback_server(flow: _OAuthFlow) -> tuple[HTTPServer, int]:
 async def fetch_token_stream(session_state: dict[str, Any] | None = None) -> AsyncGenerator[str, None]:
     """Pure-Python Azure AD OAuth2 implicit flow. No bash, no proxy needed."""
     state = _ensure_session_state(session_state)
+    try:
+        _azure_sso_config()
+    except RuntimeError as exc:
+        yield str(exc)
+        return
     flow = _OAuthFlow(state=secrets.token_urlsafe(24), nonce=secrets.token_urlsafe(24))
 
     try:

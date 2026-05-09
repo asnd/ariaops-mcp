@@ -157,6 +157,19 @@ Full spec: [`REQUIREMENTS.md`](REQUIREMENTS.md)
 
 The repo includes a Gradio-based test UI in [`test-ui/`](test-ui) for exercising the same tool handlers in-process while routing chat through an LLM gateway.
 
+Create a local env file first so no tenant IDs, client IDs, or tokens need to be hardcoded in the repo:
+
+```bash
+cp .env.example .env
+```
+
+Set `LITELLM_BASE_URL` for the gateway. If you want to use the **Get Token via Azure SSO** button, also set:
+
+```env
+AZURE_TENANT_ID=your-azure-tenant-id
+AZURE_CLIENT_ID=your-azure-client-id
+```
+
 ```bash
 python -m pip install -r test-ui/requirements.txt
 python test-ui/app.py --port 7860
@@ -192,6 +205,10 @@ cd test-ui && pytest tests
 | `ARIAOPS_PORT` | No | `8080` | HTTP listen port |
 | `ARIAOPS_LOG_LEVEL` | No | `INFO` | Log level |
 | `ARIAOPS_ENABLE_WRITE_OPERATIONS` | No | `false` | Enable mutating tools (alert management, maintenance, reports, resource lifecycle) |
+| `LITELLM_BASE_URL` | No | — | Test UI LLM gateway base URL |
+| `LITELLM_TOKEN` | No | — | Test UI JWT for the gateway |
+| `AZURE_TENANT_ID` | No | — | Test UI Azure tenant ID for browser SSO |
+| `AZURE_CLIENT_ID` | No | — | Test UI Azure client ID for browser SSO |
 
 ## License
 

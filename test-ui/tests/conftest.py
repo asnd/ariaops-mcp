@@ -48,6 +48,8 @@ def clean_env(monkeypatch):
     """Remove LLM/proxy env vars so tests start from a clean slate."""
     for var in (
         "LITELLM_TOKEN",
+        "AZURE_TENANT_ID",
+        "AZURE_CLIENT_ID",
         "HTTP_PROXY",
         "http_proxy",
         "HTTPS_PROXY",

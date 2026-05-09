@@ -585,6 +585,12 @@ class TestChatFn:
 
 
 class TestOAuthFlow:
+    @pytest.mark.asyncio
+    async def test_fetch_token_stream_requires_azure_env_vars(self):
+        gen = fetch_token_stream(_new_session_state())
+        first = await anext(gen)
+        assert "Azure SSO is not configured" in first
+
     def test_validate_oauth_callback_accepts_matching_state_and_nonce(self):
         flow = _OAuthFlow(state="abc", nonce="nonce-1")
         token = _make_jwt(int(time.time()) + 3600, {"nonce": "nonce-1"})
@@ -703,36 +709,52 @@ class TestAgenticLoop:
 
 
 class TestBuildAuthUrl:
-    def test_contains_tenant(self):
+    def test_contains_tenant(self, monkeypatch):
+        monkeypatch.setenv("AZURE_TENANT_ID", "tenant-123")
+        monkeypatch.setenv("AZURE_CLIENT_ID", "client-456")
         url = _build_auth_url(9999)
-        assert "05764a73-8c6f-4538-83cd-413f1e1b5665" in url
+        assert "tenant-123" in url
 
-    def test_contains_client_id(self):
+    def test_contains_client_id(self, monkeypatch):
+        monkeypatch.setenv("AZURE_TENANT_ID", "tenant-123")
+        monkeypatch.setenv("AZURE_CLIENT_ID", "client-456")
         url = _build_auth_url(9999)
-        assert "8bce86e2-607e-402d-87eb-4cff2463e6f7" in url
+        assert "client-456" in url
 
-    def test_redirect_uri_uses_given_port(self):
+    def test_redirect_uri_uses_given_port(self, monkeypatch):
+        monkeypatch.setenv("AZURE_TENANT_ID", "tenant-123")
+        monkeypatch.setenv("AZURE_CLIENT_ID", "client-456")
         url = _build_auth_url(8888)
         assert "localhost%3A8888" in url or "localhost:8888" in url
 
-    def test_response_type_is_id_token(self):
+    def test_response_type_is_id_token(self, monkeypatch):
+        monkeypatch.setenv("AZURE_TENANT_ID", "tenant-123")
+        monkeypatch.setenv("AZURE_CLIENT_ID", "client-456")
         url = _build_auth_url(9999)
         assert "response_type=id_token" in url
 
-    def test_response_mode_is_fragment(self):
+    def test_response_mode_is_fragment(self, monkeypatch):
+        monkeypatch.setenv("AZURE_TENANT_ID", "tenant-123")
+        monkeypatch.setenv("AZURE_CLIENT_ID", "client-456")
         url = _build_auth_url(9999)
         assert "response_mode=fragment" in url
 
-    def test_contains_nonce(self):
+    def test_contains_nonce(self, monkeypatch):
+        monkeypatch.setenv("AZURE_TENANT_ID", "tenant-123")
+        monkeypatch.setenv("AZURE_CLIENT_ID", "client-456")
         url = _build_auth_url(9999)
         assert "nonce=" in url
 
-    def test_contains_state(self):
+    def test_contains_state(self, monkeypatch):
+        monkeypatch.setenv("AZURE_TENANT_ID", "tenant-123")
+        monkeypatch.setenv("AZURE_CLIENT_ID", "client-456")
         url = _build_auth_url(9999)
         assert "state=" in url
 
-    def test_different_calls_produce_different_state(self):
+    def test_different_calls_produce_different_state(self, monkeypatch):
         """state and nonce are random per call."""
+        monkeypatch.setenv("AZURE_TENANT_ID", "tenant-123")
+        monkeypatch.setenv("AZURE_CLIENT_ID", "client-456")
         url1 = _build_auth_url(9999)
         url2 = _build_auth_url(9999)
         # Extract state values
@@ -742,10 +764,16 @@ class TestBuildAuthUrl:
         qs2 = parse_qs(urlparse(url2).query)
         assert qs1["state"] != qs2["state"]
 
-    def test_callback_path_present(self):
+    def test_callback_path_present(self, monkeypatch):
+        monkeypatch.setenv("AZURE_TENANT_ID", "tenant-123")
+        monkeypatch.setenv("AZURE_CLIENT_ID", "client-456")
         url = _build_auth_url(7777)
         # /callback appears URL-encoded inside the redirect_uri query param
         assert "%2Fcallback" in url or "/callback" in url
+
+    def test_missing_config_raises(self):
+        with pytest.raises(RuntimeError, match="Azure SSO is not configured"):
+            _build_auth_url(9999)
 
 
 # ─── _find_free_port ──────────────────────────────────────────────────────────
