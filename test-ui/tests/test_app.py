@@ -17,6 +17,7 @@ import pytest
 from app import (
     HOSTED_PROVIDERS,
     _agentic_loop,
+    _azure_sso_config,
     _build_auth_url,
     _find_free_port,
     _jwt_exp,
@@ -711,6 +712,16 @@ class TestAgenticLoop:
 
 
 class TestBuildAuthUrl:
+    def test_missing_client_id_is_reported(self, monkeypatch):
+        monkeypatch.setenv("AZURE_TENANT_ID", "tenant-123")
+        with pytest.raises(RuntimeError, match="AZURE_CLIENT_ID"):
+            _azure_sso_config()
+
+    def test_missing_tenant_id_is_reported(self, monkeypatch):
+        monkeypatch.setenv("AZURE_CLIENT_ID", "client-456")
+        with pytest.raises(RuntimeError, match="AZURE_TENANT_ID"):
+            _azure_sso_config()
+
     def test_contains_tenant(self, monkeypatch):
         monkeypatch.setenv("AZURE_TENANT_ID", "tenant-123")
         monkeypatch.setenv("AZURE_CLIENT_ID", "client-456")
