@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        continue-on-error: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+        continue-on-error: false
+
+      - name: Install ruff
+        run: pip install ruff
+        continue-on-error: false
+
+      - name: Run ruff
+        run: ruff check src/ tests/
+        continue-on-error: false
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+        continue-on-error: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+        continue-on-error: false
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]" pytest-cov
+        continue-on-error: false
+
+      - name: Run tests
+        run: pytest -ra --tb=short -v --maxfail=1 --durations=10 --cov=src/ariaops_mcp --cov-report=term-missing
+        continue-on-error: false
+        env:
+          ARIAOPS_HOST: vrops.test.local
+          ARIAOPS_USERNAME: testuser
+          ARIAOPS_PASSWORD: testpass
+
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        continue-on-error: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+        continue-on-error: false
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+        continue-on-error: false
+
+      - name: Run pyright
+        run: pyright src/
+        continue-on-error: false
