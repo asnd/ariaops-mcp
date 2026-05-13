@@ -58,26 +58,34 @@ async def test_writes_disabled_gate_delete_resources(handlers_disabled):
 
 
 def test_write_tools_absent_from_server_when_disabled(mock_env):
-    from ariaops_mcp.server import _build_registry
+    import ariaops_mcp.server as server_mod
 
-    defs, _ = _build_registry()
+    server_mod._tool_defs = None
+    server_mod._tool_handlers = None
+    defs, _ = server_mod._get_tool_registry()
     names = {t.name for t in defs}
     assert "modify_alerts" not in names
     assert "delete_resources" not in names
+    server_mod._tool_defs = None
+    server_mod._tool_handlers = None
 
 
 def test_write_tools_present_when_enabled(mock_env, monkeypatch):
     monkeypatch.setenv("ARIAOPS_ENABLE_WRITE_OPERATIONS", "true")
     from ariaops_mcp.config import clear_settings_cache
     clear_settings_cache()
-    from ariaops_mcp.server import _build_registry
+    import ariaops_mcp.server as server_mod
 
-    defs, _ = _build_registry()
+    server_mod._tool_defs = None
+    server_mod._tool_handlers = None
+    defs, _ = server_mod._get_tool_registry()
     names = {t.name for t in defs}
     assert "modify_alerts" in names
     assert "add_alert_note" in names
     assert "delete_resources" in names
     assert len([t for t in defs if t.name in {td.name for td in tool_definitions()}]) == 17
+    server_mod._tool_defs = None
+    server_mod._tool_handlers = None
 
 
 # ── tool_definitions completeness ────────────────────────────────────────────

@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     cb_recovery_timeout: int = Field(30, alias="ARIAOPS_CB_RECOVERY_TIMEOUT")
     cb_success_threshold: int = Field(2, alias="ARIAOPS_CB_SUCCESS_THRESHOLD")
 
+    # Skills
+    skills_dir: str | None = Field(None, alias="ARIAOPS_SKILLS_DIR")
+
     model_config = {"populate_by_name": True}
 
     @field_validator("transport", mode="before")
