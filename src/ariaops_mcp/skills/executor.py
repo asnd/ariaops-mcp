@@ -8,6 +8,7 @@ to prevent injection.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -18,11 +19,26 @@ from ariaops_mcp.skills.models import Skill
 
 logger = logging.getLogger(__name__)
 
-_ARG_TEMPLATE_RE = re.compile(r"\{\{(\w+)\}\}")
-_STEP_REF_RE = re.compile(r"\{\{steps\.(\d+)\.(\w+)\}\}")
+# Match {{arg_name}} — supports hyphens in names.
+_ARG_TEMPLATE_RE = re.compile(r"\{\{([\w-]+)\}\}")
 
-# Sentinel indicating a step output is unavailable (failed or skipped upstream).
-_UNAVAILABLE = object()
+# Match {{steps.N.field}} or {{steps.N.field.subfield}} — dot-delimited path traversal.
+_STEP_REF_RE = re.compile(r"\{\{steps\.(\d+)\.([\w.]+)\}\}")
+
+# Default per-step timeout in seconds.
+_DEFAULT_STEP_TIMEOUT = 60.0
+
+
+def _nested_get(data: dict[str, Any], dotted_path: str, default: Any = "") -> Any:
+    """Traverse a dict by dotted path, e.g. 'alert.id' -> data['alert']['id']."""
+    keys = dotted_path.split(".")
+    current: Any = data
+    for key in keys:
+        if isinstance(current, dict) and key in current:
+            current = current[key]
+        else:
+            return default
+    return current
 
 
 def _resolve_value(
@@ -36,14 +52,13 @@ def _resolve_value(
     def _replace_step_ref(match: re.Match[str]) -> str:
         nonlocal has_unresolved_ref
         step_idx = int(match.group(1))
-        field = match.group(2)
+        dotted_path = match.group(2)
         if step_idx < len(step_outputs):
             output = step_outputs[step_idx]
             if output is None:
-                # Referenced step failed/was skipped.
                 has_unresolved_ref = True
                 return match.group(0)
-            val = output.get(field, "")
+            val = _nested_get(output, dotted_path, "")
             if isinstance(val, (dict, list)):
                 return json.dumps(val)
             return str(val)
@@ -75,12 +90,16 @@ def _resolve_args(
     for key, template in args_template.items():
         value = _resolve_value(template, arguments, step_outputs)
         if value is None:
-            return None  # Unresolvable dependency
-        # Attempt JSON parse for structured values (e.g., lists, numbers, booleans).
-        try:
-            resolved[key] = json.loads(value)
-        except (json.JSONDecodeError, TypeError):
-            resolved[key] = value
+            return None
+        # Only JSON-parse if the value looks like a structured literal.
+        stripped = value.strip()
+        if stripped.startswith(("{", "[")):
+            try:
+                resolved[key] = json.loads(value)
+                continue
+            except (json.JSONDecodeError, TypeError):
+                pass
+        resolved[key] = value
     return resolved
 
 
@@ -129,6 +148,7 @@ async def execute_skill(
     *,
     write_enabled: bool = False,
     write_tool_names: set[str] | None = None,
+    step_timeout: float = _DEFAULT_STEP_TIMEOUT,
 ) -> dict[str, Any]:
     """Execute a skill's orchestration steps with output chaining.
 
@@ -138,6 +158,7 @@ async def execute_skill(
         tool_handlers: All available tool handlers.
         write_enabled: Whether write operations are permitted.
         write_tool_names: Set of tool names considered write/mutating operations.
+        step_timeout: Per-step timeout in seconds.
 
     Returns:
         Dict with execution results including per-step status and outputs.
@@ -205,7 +226,7 @@ async def execute_skill(
             continue
 
         try:
-            raw_result = await handler(resolved_args)
+            raw_result = await asyncio.wait_for(handler(resolved_args), timeout=step_timeout)
 
             parsed: Any = raw_result
             if isinstance(raw_result, str):
@@ -228,6 +249,15 @@ async def execute_skill(
             })
             success_count += 1
 
+        except TimeoutError:
+            logger.error("Skill '%s' step %d (%s) timed out after %.1fs", skill.name, i, step.tool, step_timeout)
+            step_outputs.append(None)
+            results.append({
+                "step": i + 1,
+                "tool": step.tool,
+                "status": "error",
+                "error": f"Step timed out after {step_timeout}s",
+            })
         except Exception as exc:
             logger.exception("Skill '%s' step %d (%s) failed", skill.name, i, step.tool)
             step_outputs.append(None)

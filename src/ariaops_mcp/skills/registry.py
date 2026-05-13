@@ -12,7 +12,7 @@ from ariaops_mcp.skills.models import Skill
 
 logger = logging.getLogger(__name__)
 
-_TEMPLATE_RE = re.compile(r"\{\{(\w+)\}\}")
+_TEMPLATE_RE = re.compile(r"\{\{([\w-]+)\}\}")
 
 
 def render_template(body: str, arguments: dict[str, str] | None = None) -> str:

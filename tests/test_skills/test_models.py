@@ -16,6 +16,27 @@ class TestSkillArgument:
         arg = SkillArgument(name="depth", description="Investigation depth", required=False)
         assert arg.description == "Investigation depth"
 
+    def test_valid_with_hyphens(self):
+        """Argument names with hyphens should be valid."""
+        arg = SkillArgument(name="time-range-hours")
+        assert arg.name == "time-range-hours"
+
+    def test_invalid_name_uppercase(self):
+        with pytest.raises(Exception):
+            SkillArgument(name="InvalidName")
+
+    def test_invalid_name_spaces(self):
+        with pytest.raises(Exception):
+            SkillArgument(name="bad name")
+
+    def test_invalid_name_start_with_hyphen(self):
+        with pytest.raises(Exception):
+            SkillArgument(name="-bad")
+
+    def test_invalid_name_empty(self):
+        with pytest.raises(Exception):
+            SkillArgument(name="")
+
 
 class TestSkillStep:
     def test_full(self):
@@ -84,6 +105,38 @@ class TestSkillStepsToolsValidation:
         assert len(skill.steps) == 2
 
 
+class TestOrchestrationRequiresTools:
+    def test_orchestration_without_tools_rejected(self):
+        """Orchestration skills must declare at least one tool."""
+        with pytest.raises(Exception, match="Orchestration-enabled skills must declare"):
+            Skill(
+                name="bad-orch",
+                description="Orchestration without tools",
+                orchestration=True,
+                steps=[SkillStep(tool="get_alert", args_template={})],
+            )
+
+    def test_orchestration_with_tools_accepted(self):
+        """Orchestration with non-empty tools should pass."""
+        skill = Skill(
+            name="good-orch",
+            description="Orchestration with tools",
+            tools=["get_alert"],
+            orchestration=True,
+            steps=[SkillStep(tool="get_alert", args_template={})],
+        )
+        assert skill.orchestration is True
+
+    def test_non_orchestration_without_tools_accepted(self):
+        """Non-orchestration skills don't need tools."""
+        skill = Skill(
+            name="info-skill",
+            description="Just instructions",
+            orchestration=False,
+        )
+        assert skill.tools == []
+
+
 class TestSkillMinimalAndFull:
     def test_minimal(self):
         skill = Skill(name="test-skill", description="A test skill")
@@ -93,7 +146,7 @@ class TestSkillMinimalAndFull:
         assert skill.orchestration is False
         assert skill.steps == []
         assert skill.body == ""
-        assert skill.source_path == ""
+        assert skill.source_path is None
 
     def test_full(self):
         skill = Skill(

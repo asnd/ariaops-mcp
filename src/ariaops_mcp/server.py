@@ -272,6 +272,9 @@ def create_server() -> Server:
                 "detail": f"Total time exceeded {get_settings().request_deadline}s including retries",
                 "correlation_id": cid,
             })
+        except Exception as e:
+            logger.exception("Tool '%s' failed unexpectedly", name)
+            result = json.dumps({"error": "Unexpected error", "detail": str(e), "correlation_id": cid})
 
         duration_ms = (time.monotonic() - start) * 1000
         logger.info(

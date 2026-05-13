@@ -85,4 +85,13 @@ def reset_settings_override(token: Token[Settings | None]) -> None:
 
 
 def clear_settings_cache() -> None:
+    """Invalidate the settings cache and clear cached tool registry."""
     _get_cached_settings.cache_clear()
+    # Also invalidate the server-level tool registry cache so write-ops
+    # status is re-evaluated on next access after settings change.
+    try:
+        import ariaops_mcp.server as _svr
+        _svr._tool_defs = None
+        _svr._tool_handlers = None
+    except Exception:
+        pass

@@ -26,13 +26,17 @@ class TestRenderTemplate:
         assert result == "X and Y"
 
     def test_no_recursive_expansion(self):
-        """Values containing {{...}} patterns must NOT be recursively expanded."""
         result = render_template("Hello {{name}}!", {"name": "{{injected}}"})
         assert result == "Hello {{injected}}!"
 
     def test_empty_arguments(self):
         result = render_template("No placeholders here", None)
         assert result == "No placeholders here"
+
+    def test_hyphens_in_keys(self):
+        """Keys with hyphens should resolve correctly (#3)."""
+        result = render_template("{{my-arg}} is set", {"my-arg": "yes"})
+        assert result == "yes is set"
 
 
 class TestSkillRegistry:
@@ -75,7 +79,7 @@ class TestSkillRegistry:
 
     def test_reload_without_directory(self):
         reg = SkillRegistry()
-        reg.reload()  # should not raise
+        reg.reload()
 
     def test_render_body_with_substitution(self, tmp_path):
         content = "---\nname: greet\ndescription: Greeting\n---\n\nHello {{name}}!"
@@ -150,7 +154,6 @@ class TestContextVarOverride:
         override_reg = SkillRegistry()
         override_reg.load(tmp_path)
 
-        # Global registry should be empty
         global_reg = get_registry()
         assert global_reg.get("override-skill") is None
 
@@ -158,6 +161,5 @@ class TestContextVarOverride:
         assert get_registry().get("override-skill") is not None
         reset_registry_override(token)
 
-        # Back to global
         assert get_registry() is global_reg
         assert get_registry().get("override-skill") is None

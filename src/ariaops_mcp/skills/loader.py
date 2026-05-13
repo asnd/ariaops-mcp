@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 import yaml
+from pydantic import ValidationError
 
 from ariaops_mcp.skills.models import Skill
 
@@ -15,10 +16,29 @@ logger = logging.getLogger(__name__)
 # Handles both Unix (\n) and Windows (\r\n) line endings.
 _FRONTMATTER_RE = re.compile(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", re.DOTALL)
 
+# Case-insensitive .md/.MD glob glob — returns unique paths.
+_GLOB_PATTERNS = ("*.md", "*.MD")
+
+
+def _iter_skill_paths(directory: Path):
+    """Yield all .md/.MD file paths in the directory, deduplicated."""
+    seen: set[str] = set()
+    for pattern in _GLOB_PATTERNS:
+        for path in sorted(directory.glob(pattern)):
+            key = str(path.resolve())
+            if key not in seen:
+                seen.add(key)
+                yield path
+
 
 def parse_skill_file(path: Path) -> Skill | None:
     """Parse a single SKILL.md file into a Skill model, or None on failure."""
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        logger.warning("Skill file %s is not valid UTF-8; skipping", path)
+        return None
+
     # Normalize CRLF to LF for consistent regex matching and body handling.
     text = text.replace("\r\n", "\n")
 
@@ -40,12 +60,18 @@ def parse_skill_file(path: Path) -> Skill | None:
         logger.warning("Skill file %s frontmatter is not a mapping; skipping", path)
         return None
 
+    if "body" in raw:
+        logger.warning(
+            "Skill file %s has a 'body' key in frontmatter; it will be overwritten by the markdown body",
+            path,
+        )
+
     raw["body"] = body
     raw["source_path"] = str(path)
 
     try:
         skill = Skill.model_validate(raw)
-    except Exception:
+    except ValidationError:
         logger.exception("Skill file %s failed validation; skipping", path)
         return None
 
@@ -59,16 +85,27 @@ def load_skills_from_directory(directory: Path) -> list[Skill]:
         return []
 
     skills: dict[str, Skill] = {}
+    errors: list[str] = []
 
-    for path in sorted(directory.glob("*.md")):
+    for path in _iter_skill_paths(directory):
         skill = parse_skill_file(path)
         if skill is None:
             continue
 
         if skill.name in skills:
-            logger.warning("Duplicate skill name '%s' from %s; overwriting previous", skill.name, path)
+            existing = skills[skill.name]
+            msg = (
+                f"Duplicate skill name '{skill.name}' in {path} (already defined in {existing.source_path}). "
+                f"Skill names must be unique."
+            )
+            errors.append(msg)
+            logger.error(msg)
+            continue
 
         skills[skill.name] = skill
+
+    if errors:
+        logger.error("Encountered %d duplicate skill name(s); these skills were not loaded", len(errors))
 
     result = list(skills.values())
     logger.info("Loaded %d skill(s) from %s", len(result), directory)

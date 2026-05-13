@@ -1,5 +1,6 @@
 """Tests for skills/loader.py."""
 
+
 from ariaops_mcp.skills.loader import load_skills_from_directory, parse_skill_file
 
 
@@ -87,7 +88,31 @@ Investigate alert {{alert_id}}.
         content = "---\nname: Invalid Name\ndescription: Bad\n---\n\nBody"
         path = _write_skill_file(tmp_path, "invalid_name.md", content)
         skill = parse_skill_file(path)
-        assert skill is None  # model validation should fail
+        assert skill is None
+
+    def test_non_utf8_file(self, tmp_path):
+        """Non-UTF-8 files should be skipped gracefully."""
+        path = tmp_path / "latin1.md"
+        path.write_bytes(b"---\nname: \xe9l\xe9ve\ndescription: test\n---\n\nBody")
+        skill = parse_skill_file(path)
+        assert skill is None
+
+    def test_body_key_in_frontmatter_warns(self, tmp_path):
+        """If frontmatter has a 'body' key, it should be overwritten by markdown body."""
+        content = "---\nname: test\ndescription: Test\nbody: original\n---\n\nActual markdown body"
+        path = _write_skill_file(tmp_path, "test.md", content)
+        skill = parse_skill_file(path)
+        assert skill is not None
+        assert "Actual markdown body" in skill.body
+        assert "original" not in skill.body
+
+    def test_embedded_dashes_in_frontmatter(self, tmp_path):
+        """A description with '---' in it should parse correctly."""
+        content = "---\nname: dash-test\ndescription: A skill with --- in the description\n---\n\nBody"
+        path = _write_skill_file(tmp_path, "dashes.md", content)
+        skill = parse_skill_file(path)
+        assert skill is not None
+        assert skill.name == "dash-test"
 
 
 class TestLoadSkillsFromDirectory:
@@ -122,12 +147,23 @@ class TestLoadSkillsFromDirectory:
         skills = load_skills_from_directory(empty_dir)
         assert skills == []
 
-    def test_duplicate_name_overwrites(self, tmp_path):
+    def test_duplicate_name_is_hard_error(self, tmp_path):
+        """Duplicate skill names must be rejected (not overwritten)."""
         skill_a = "---\nname: dup\ndescription: First\n---\n\nBody A"
         skill_b = "---\nname: dup\ndescription: Second\n---\n\nBody B"
         _write_skill_file(tmp_path, "a.md", skill_a)
         _write_skill_file(tmp_path, "b.md", skill_b)
 
         skills = load_skills_from_directory(tmp_path)
+        # Only the first file with the name should be loaded.
         assert len(skills) == 1
-        assert skills[0].description == "Second"
+        assert skills[0].description == "First"
+
+    def test_case_insensitive_md_glob(self, tmp_path):
+        """Both .md and .MD files should be discovered."""
+        content = "---\nname: upper-md\ndescription: Uppercase\n---\n\nBody"
+        _write_skill_file(tmp_path, "file.MD", content)
+
+        skills = load_skills_from_directory(tmp_path)
+        assert len(skills) == 1
+        assert skills[0].name == "upper-md"
