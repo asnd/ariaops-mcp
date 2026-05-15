@@ -28,11 +28,14 @@ class Settings(BaseSettings):
         alias="ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES",
     )
     http_oauth_jwt_key: str | None = Field(None, alias="ARIAOPS_HTTP_OAUTH_JWT_KEY")
+    http_oauth_jwks_url: AnyHttpUrl | None = Field(None, alias="ARIAOPS_HTTP_OAUTH_JWKS_URL")
     http_oauth_jwt_algorithms: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["HS256"],
         alias="ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS",
     )
     http_oauth_audience: str | None = Field(None, alias="ARIAOPS_HTTP_OAUTH_AUDIENCE")
+    http_oauth_leeway_seconds: int = Field(30, alias="ARIAOPS_HTTP_OAUTH_LEEWAY_SECONDS")
+    http_oauth_jwks_cache_ttl: int = Field(300, alias="ARIAOPS_HTTP_OAUTH_JWKS_CACHE_TTL")
 
     # Resilience
     request_deadline: float = Field(120.0, alias="ARIAOPS_REQUEST_DEADLINE")
@@ -99,7 +102,6 @@ class Settings(BaseSettings):
         required_fields = {
             "ARIAOPS_HTTP_OAUTH_ISSUER_URL": self.http_oauth_issuer_url,
             "ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL": self.http_oauth_resource_server_url,
-            "ARIAOPS_HTTP_OAUTH_JWT_KEY": self.http_oauth_jwt_key,
         }
         missing = [name for name, value in required_fields.items() if not value]
         if missing:
@@ -107,6 +109,44 @@ class Settings(BaseSettings):
 
         if not self.http_oauth_jwt_algorithms:
             raise ValueError("HTTP OAuth requires at least one JWT algorithm")
+
+        if not self.http_oauth_jwt_key and not self.http_oauth_jwks_url:
+            raise ValueError(
+                "HTTP OAuth requires one of ARIAOPS_HTTP_OAUTH_JWT_KEY "
+                "(static secret/PEM) or ARIAOPS_HTTP_OAUTH_JWKS_URL (e.g. Keycloak's "
+                "/realms/<realm>/protocol/openid-connect/certs)"
+            )
+        if self.http_oauth_jwt_key and self.http_oauth_jwks_url:
+            raise ValueError(
+                "Set only one of ARIAOPS_HTTP_OAUTH_JWT_KEY or "
+                "ARIAOPS_HTTP_OAUTH_JWKS_URL, not both"
+            )
+
+        hmac_algs = {a for a in self.http_oauth_jwt_algorithms if a.startswith("HS")}
+        if hmac_algs and self.http_oauth_jwks_url:
+            raise ValueError(
+                "HMAC algorithms (HS256/384/512) are incompatible with JWKS — "
+                "JWKS is for asymmetric keys (RS*/ES*/PS*). "
+                "Either remove HS* from ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS or "
+                "switch to ARIAOPS_HTTP_OAUTH_JWT_KEY."
+            )
+        # If any HMAC algorithm is configured, the shared secret must be long
+        # enough to resist offline brute force. RFC 7518 §3.2 requires the key
+        # be at least as long as the hash output (HS256 → 32 bytes).
+        if hmac_algs:
+            min_bytes = 32
+            key_bytes = len((self.http_oauth_jwt_key or "").encode("utf-8"))
+            if key_bytes < min_bytes:
+                raise ValueError(
+                    f"ARIAOPS_HTTP_OAUTH_JWT_KEY must be at least {min_bytes} bytes "
+                    f"when an HMAC algorithm is used (got {key_bytes}). "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                )
+
+        if self.http_oauth_leeway_seconds < 0:
+            raise ValueError("ARIAOPS_HTTP_OAUTH_LEEWAY_SECONDS must be >= 0")
+        if self.http_oauth_jwks_cache_ttl < 0:
+            raise ValueError("ARIAOPS_HTTP_OAUTH_JWKS_CACHE_TTL must be >= 0")
 
         return self
 

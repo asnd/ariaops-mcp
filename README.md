@@ -70,9 +70,76 @@ ARIAOPS_TRANSPORT=http \
 ARIAOPS_HTTP_OAUTH_ENABLED=true \
 ARIAOPS_HTTP_OAUTH_ISSUER_URL=https://issuer.example.com \
 ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL=https://mcp.example.com \
-ARIAOPS_HTTP_OAUTH_JWT_KEY=replace-me \
+ARIAOPS_HTTP_OAUTH_JWT_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
+ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES=mcp:read \
 python -m ariaops_mcp
 ```
+
+#### OAuth knobs
+
+| Variable | Required | Default | Notes |
+|----------|----------|---------|-------|
+| `ARIAOPS_HTTP_OAUTH_ENABLED` | no | `false` | Turn enforcement on. Requires `ARIAOPS_TRANSPORT=http`. |
+| `ARIAOPS_HTTP_OAUTH_ISSUER_URL` | yes | — | Expected `iss` claim and the authorization server published via the discovery doc. |
+| `ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL` | yes | — | This server's resource identifier — used as the default `aud` and exposed via `/.well-known/oauth-protected-resource`. |
+| `ARIAOPS_HTTP_OAUTH_JWT_KEY` | one of | — | HS256/384/512 shared secret (≥32 bytes) **or** PEM public key for RS*/ES*/PS*. |
+| `ARIAOPS_HTTP_OAUTH_JWKS_URL` | one of | — | JWKS endpoint URL (e.g. Keycloak's `/realms/<realm>/protocol/openid-connect/certs`). Mutually exclusive with `JWT_KEY`; required for IdPs that rotate keys. |
+| `ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS` | no | `HS256` | Comma-separated list. The verifier rejects every algorithm not on this list (so `alg: none` and algorithm confusion are blocked). |
+| `ARIAOPS_HTTP_OAUTH_AUDIENCE` | no | resource URL | Override if your IdP issues a different `aud`. |
+| `ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES` | no | `[]` | Tokens must carry every listed scope or get a 403 `insufficient_scope`. |
+| `ARIAOPS_HTTP_OAUTH_LEEWAY_SECONDS` | no | `30` | Clock-skew tolerance for `exp` / `nbf` / `iat`. |
+| `ARIAOPS_HTTP_OAUTH_JWKS_CACHE_TTL` | no | `300` | How long (s) to cache JWKS keys before refetching. |
+
+**Discovery:** With OAuth enabled, the server publishes
+`GET /.well-known/oauth-protected-resource` per RFC 9728 so MCP clients
+auto-discover the authorization server and required scopes.
+
+**Health:** `GET /health` is intentionally unauthenticated so probes and load
+balancers keep working with OAuth turned on.
+
+#### Keycloak setup
+
+Keycloak is a supported IdP. Use JWKS — Keycloak rotates RS256 keys.
+
+1. **Create a client** in your realm (`Clients → Create client`):
+   - *Client type:* OpenID Connect
+   - *Client authentication:* on (confidential) for the MCP client
+   - *Valid redirect URIs:* whatever your MCP client uses
+2. **Add an Audience mapper** (`Client scopes → <client>-dedicated → Add mapper → Audience`):
+   - *Included Client Audience:* the client ID you want as `aud` (e.g. `mcp-client`).
+   - This is required because Keycloak does **not** put the resource URL in `aud` by default.
+3. **Add scope(s)** (`Client scopes → Create`) and assign to the client (`Default` or `Optional`).
+4. **Configure ariaops-mcp:**
+
+   ```bash
+   ARIAOPS_TRANSPORT=http \
+   ARIAOPS_HTTP_OAUTH_ENABLED=true \
+   ARIAOPS_HTTP_OAUTH_ISSUER_URL=https://kc.example.com/realms/myrealm \
+   ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL=https://mcp.example.com \
+   ARIAOPS_HTTP_OAUTH_JWKS_URL=https://kc.example.com/realms/myrealm/protocol/openid-connect/certs \
+   ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS=RS256 \
+   ARIAOPS_HTTP_OAUTH_AUDIENCE=mcp-client \
+   ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES=mcp:read \
+   python -m ariaops_mcp
+   ```
+
+5. **Test from the CLI** with a client-credentials grant:
+
+   ```bash
+   TOKEN=$(curl -s -X POST \
+     "https://kc.example.com/realms/myrealm/protocol/openid-connect/token" \
+     -d grant_type=client_credentials \
+     -d client_id=mcp-client \
+     -d client_secret=$KC_SECRET \
+     -d scope="mcp:read" | jq -r .access_token)
+
+   curl -H "Authorization: Bearer $TOKEN" https://mcp.example.com/
+   ```
+
+Notes:
+- `iss` in Keycloak tokens is exactly `https://<host>/realms/<realm>` (no trailing slash). The verifier strips trailing slashes on both sides, so either form works in config.
+- Roles (`realm_access.roles`, `resource_access.<client>.roles`) are not enforced — only OAuth `scope`. Map roles to scopes in Keycloak if you need RBAC.
+- The verifier wraps `PyJWKClient` in `asyncio.to_thread`, so a JWKS cache miss does not block the event loop.
 
 ### Run with Podman
 
@@ -217,10 +284,13 @@ cd test-ui && pytest tests
 | `ARIAOPS_HTTP_OAUTH_ENABLED` | No | `false` | Require OAuth 2.x bearer tokens on the HTTP MCP transport |
 | `ARIAOPS_HTTP_OAUTH_ISSUER_URL` | No | — | OAuth 2.x issuer URL advertised to MCP clients when HTTP auth is enabled |
 | `ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL` | No | — | Public MCP HTTP endpoint URL used for OAuth protected-resource metadata |
-| `ARIAOPS_HTTP_OAUTH_JWT_KEY` | No | — | Shared secret or verification key for bearer JWT validation |
+| `ARIAOPS_HTTP_OAUTH_JWT_KEY` | One of | — | HS* shared secret (≥32 bytes) or PEM public key for RS*/ES*/PS* |
+| `ARIAOPS_HTTP_OAUTH_JWKS_URL` | One of | — | JWKS endpoint (e.g. Keycloak certs URL); mutually exclusive with `JWT_KEY` |
 | `ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS` | No | `HS256` | Comma-separated or JSON-array list of accepted JWT algorithms |
 | `ARIAOPS_HTTP_OAUTH_AUDIENCE` | No | `ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL` | Expected JWT audience for HTTP bearer tokens |
 | `ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES` | No | — | Comma-separated or JSON-array list of scopes required for HTTP MCP access |
+| `ARIAOPS_HTTP_OAUTH_LEEWAY_SECONDS` | No | `30` | Clock-skew tolerance for `exp`/`nbf`/`iat` |
+| `ARIAOPS_HTTP_OAUTH_JWKS_CACHE_TTL` | No | `300` | JWKS cache lifetime in seconds |
 | `ARIAOPS_LOG_LEVEL` | No | `INFO` | Log level |
 | `ARIAOPS_ENABLE_WRITE_OPERATIONS` | No | `false` | Enable mutating tools (alert management, maintenance, reports, resource lifecycle) |
 | `LITELLM_BASE_URL` | No | — | Test UI LLM gateway base URL |

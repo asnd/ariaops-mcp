@@ -61,8 +61,11 @@ def create_http_app(
     if s.http_oauth_enabled:
         issuer_url = s.http_oauth_issuer_url
         resource_server_url = s.http_oauth_resource_server_url
-        assert issuer_url is not None
-        assert resource_server_url is not None
+        if issuer_url is None or resource_server_url is None:
+            raise RuntimeError(
+                "OAuth is enabled but issuer/resource-server URLs are missing — "
+                "this should have been caught by Settings validation."
+            )
         verifier = JWTTokenVerifier(s)
         middleware = [
             Middleware(AuthenticationMiddleware, backend=BearerAuthBackend(verifier)),

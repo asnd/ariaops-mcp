@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 import jwt
+from jwt import PyJWKClient
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 
 from ariaops_mcp.config import Settings
@@ -40,15 +42,41 @@ class JWTTokenVerifier(TokenVerifier):
         )
         self._jwt_key = settings.http_oauth_jwt_key or ""
         self._algorithms = settings.http_oauth_jwt_algorithms
+        self._leeway = settings.http_oauth_leeway_seconds
+        self._jwks_client: PyJWKClient | None = None
+        if settings.http_oauth_jwks_url is not None:
+            self._jwks_client = PyJWKClient(
+                str(settings.http_oauth_jwks_url),
+                cache_keys=True,
+                lifespan=settings.http_oauth_jwks_cache_ttl,
+            )
+
+    async def _resolve_signing_key(self, token: str) -> str:
+        if self._jwks_client is None:
+            return self._jwt_key
+        # PyJWKClient.get_signing_key_from_jwt is sync (urllib + parsing).
+        # Run off-loop so we don't block the event loop on cache misses.
+        signing_key = await asyncio.to_thread(
+            self._jwks_client.get_signing_key_from_jwt, token
+        )
+        return signing_key.key
 
     async def verify_token(self, token: str) -> AccessToken | None:
+        if not token or not isinstance(token, str):
+            logger.warning("Rejected empty or non-string HTTP OAuth bearer token")
+            return None
         try:
+            key = await self._resolve_signing_key(token)
             claims = jwt.decode(
                 token,
-                self._jwt_key,
+                key,
                 algorithms=self._algorithms,
+                leeway=self._leeway,
                 options={"verify_iss": False, "verify_aud": False},
             )
+        except jwt.PyJWKClientError as exc:
+            logger.warning("Rejected HTTP OAuth bearer token (JWKS lookup failed): %s", exc)
+            return None
         except jwt.InvalidTokenError as exc:
             logger.warning("Rejected HTTP OAuth bearer token: %s", exc)
             return None
