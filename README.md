@@ -63,6 +63,17 @@ python -m ariaops_mcp
 ARIAOPS_TRANSPORT=http ARIAOPS_PORT=8080 python -m ariaops_mcp
 ```
 
+To require OAuth 2.x bearer tokens on the HTTP transport, enable the flag and provide the resource-server settings:
+
+```bash
+ARIAOPS_TRANSPORT=http \
+ARIAOPS_HTTP_OAUTH_ENABLED=true \
+ARIAOPS_HTTP_OAUTH_ISSUER_URL=https://issuer.example.com \
+ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL=https://mcp.example.com \
+ARIAOPS_HTTP_OAUTH_JWT_KEY=replace-me \
+python -m ariaops_mcp
+```
+
 ### Run with Podman
 
 ```bash
@@ -203,6 +214,13 @@ cd test-ui && pytest tests
 | `ARIAOPS_VERIFY_SSL` | No | `true` | TLS certificate verification |
 | `ARIAOPS_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `ARIAOPS_PORT` | No | `8080` | HTTP listen port |
+| `ARIAOPS_HTTP_OAUTH_ENABLED` | No | `false` | Require OAuth 2.x bearer tokens on the HTTP MCP transport |
+| `ARIAOPS_HTTP_OAUTH_ISSUER_URL` | No | — | OAuth 2.x issuer URL advertised to MCP clients when HTTP auth is enabled |
+| `ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL` | No | — | Public MCP HTTP endpoint URL used for OAuth protected-resource metadata |
+| `ARIAOPS_HTTP_OAUTH_JWT_KEY` | No | — | Shared secret or verification key for bearer JWT validation |
+| `ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS` | No | `HS256` | Comma-separated or JSON-array list of accepted JWT algorithms |
+| `ARIAOPS_HTTP_OAUTH_AUDIENCE` | No | `ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL` | Expected JWT audience for HTTP bearer tokens |
+| `ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES` | No | — | Comma-separated or JSON-array list of scopes required for HTTP MCP access |
 | `ARIAOPS_LOG_LEVEL` | No | `INFO` | Log level |
 | `ARIAOPS_ENABLE_WRITE_OPERATIONS` | No | `false` | Enable mutating tools (alert management, maintenance, reports, resource lifecycle) |
 | `LITELLM_BASE_URL` | No | — | Test UI LLM gateway base URL |

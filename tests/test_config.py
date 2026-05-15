@@ -65,3 +65,44 @@ def test_write_operations_false_string(monkeypatch):
     settings = Settings()  # type: ignore[call-arg]
     assert settings.enable_write_operations is False
 
+
+def test_http_oauth_enabled_requires_http_transport(monkeypatch):
+    monkeypatch.setenv("ARIAOPS_HOST", "vrops.test.local")
+    monkeypatch.setenv("ARIAOPS_USERNAME", "testuser")
+    monkeypatch.setenv("ARIAOPS_PASSWORD", "testpass")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_ISSUER_URL", "https://issuer.example.com")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL", "https://mcp.example.com")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_JWT_KEY", "secret")
+
+    with pytest.raises(ValidationError, match="ARIAOPS_HTTP_OAUTH_ENABLED requires ARIAOPS_TRANSPORT=http"):
+        Settings()  # type: ignore[call-arg]
+
+
+def test_http_oauth_requires_complete_configuration(monkeypatch):
+    monkeypatch.setenv("ARIAOPS_HOST", "vrops.test.local")
+    monkeypatch.setenv("ARIAOPS_USERNAME", "testuser")
+    monkeypatch.setenv("ARIAOPS_PASSWORD", "testpass")
+    monkeypatch.setenv("ARIAOPS_TRANSPORT", "http")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_ISSUER_URL", "https://issuer.example.com")
+
+    with pytest.raises(ValidationError, match="ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL"):
+        Settings()  # type: ignore[call-arg]
+
+
+def test_http_oauth_list_settings_normalized(monkeypatch):
+    monkeypatch.setenv("ARIAOPS_HOST", "vrops.test.local")
+    monkeypatch.setenv("ARIAOPS_USERNAME", "testuser")
+    monkeypatch.setenv("ARIAOPS_PASSWORD", "testpass")
+    monkeypatch.setenv("ARIAOPS_TRANSPORT", "http")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_ISSUER_URL", "https://issuer.example.com")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL", "https://mcp.example.com")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_JWT_KEY", "secret")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES", "mcp:read, mcp:write")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS", "[\"HS256\", \"HS512\"]")
+
+    settings = Settings()  # type: ignore[call-arg]
+    assert settings.http_oauth_required_scopes == ["mcp:read", "mcp:write"]
+    assert settings.http_oauth_jwt_algorithms == ["HS256", "HS512"]

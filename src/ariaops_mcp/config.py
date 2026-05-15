@@ -1,11 +1,12 @@
 """Configuration loaded from environment variables."""
 
+import json
 from contextvars import ContextVar, Token
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic import AnyHttpUrl, Field, ValidationInfo, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode
 
 
 class Settings(BaseSettings):
@@ -19,6 +20,19 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field("INFO", alias="ARIAOPS_LOG_LEVEL")
     log_format: Literal["text", "json"] = Field("text", alias="ARIAOPS_LOG_FORMAT")
     enable_write_operations: bool = Field(False, alias="ARIAOPS_ENABLE_WRITE_OPERATIONS")
+    http_oauth_enabled: bool = Field(False, alias="ARIAOPS_HTTP_OAUTH_ENABLED")
+    http_oauth_issuer_url: AnyHttpUrl | None = Field(None, alias="ARIAOPS_HTTP_OAUTH_ISSUER_URL")
+    http_oauth_resource_server_url: AnyHttpUrl | None = Field(None, alias="ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL")
+    http_oauth_required_scopes: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        alias="ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES",
+    )
+    http_oauth_jwt_key: str | None = Field(None, alias="ARIAOPS_HTTP_OAUTH_JWT_KEY")
+    http_oauth_jwt_algorithms: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["HS256"],
+        alias="ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS",
+    )
+    http_oauth_audience: str | None = Field(None, alias="ARIAOPS_HTTP_OAUTH_AUDIENCE")
 
     # Resilience
     request_deadline: float = Field(120.0, alias="ARIAOPS_REQUEST_DEADLINE")
@@ -49,12 +63,52 @@ class Settings(BaseSettings):
     def normalize_log_format(cls, value: str) -> str:
         return value.lower()
 
+    @field_validator("http_oauth_required_scopes", "http_oauth_jwt_algorithms", mode="before")
+    @classmethod
+    def normalize_string_list(cls, value: Any, info: ValidationInfo) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                parsed = json.loads(stripped)
+                if not isinstance(parsed, list):
+                    raise ValueError(f"Expected a JSON array for {info.field_name}")
+                return [str(item).strip() for item in parsed if str(item).strip()]
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        raise ValueError("Expected a comma-separated string or list")
+
     @field_validator("host")
     @classmethod
     def host_must_not_include_scheme(cls, value: str) -> str:
         if "://" in value:
             raise ValueError("ARIAOPS_HOST should be hostname only (no scheme)")
         return value
+
+    @model_validator(mode="after")
+    def validate_http_oauth(self) -> "Settings":
+        if not self.http_oauth_enabled:
+            return self
+        if self.transport != "http":
+            raise ValueError("ARIAOPS_HTTP_OAUTH_ENABLED requires ARIAOPS_TRANSPORT=http")
+
+        required_fields = {
+            "ARIAOPS_HTTP_OAUTH_ISSUER_URL": self.http_oauth_issuer_url,
+            "ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL": self.http_oauth_resource_server_url,
+            "ARIAOPS_HTTP_OAUTH_JWT_KEY": self.http_oauth_jwt_key,
+        }
+        missing = [name for name, value in required_fields.items() if not value]
+        if missing:
+            raise ValueError(f"HTTP OAuth requires: {', '.join(missing)}")
+
+        if not self.http_oauth_jwt_algorithms:
+            raise ValueError("HTTP OAuth requires at least one JWT algorithm")
+
+        return self
 
     @property
     def base_url(self) -> str:
@@ -93,5 +147,7 @@ def clear_settings_cache() -> None:
         import ariaops_mcp.server as _svr
         _svr._tool_defs = None
         _svr._tool_handlers = None
+        _svr._TOOL_DEFS = None
+        _svr._TOOL_HANDLERS = None
     except Exception:
         pass
