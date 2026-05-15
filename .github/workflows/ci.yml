@@ -6,50 +6,62 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        continue-on-error: false
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-        continue-on-error: false
 
-      - name: Install ruff
-        run: pip install ruff
-        continue-on-error: false
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Sync dev deps
+        run: uv sync --extra dev --frozen
 
       - name: Run ruff
-        run: ruff check src/ tests/
-        continue-on-error: false
+        run: uv run ruff check src/ tests/
 
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
-        continue-on-error: false
 
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-        continue-on-error: false
 
-      - name: Install dependencies
-        run: pip install -e ".[dev]" pytest-cov
-        continue-on-error: false
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Sync dev deps
+        run: uv sync --extra dev --frozen
+
+      - name: Install pytest-cov
+        run: uv pip install pytest-cov
 
       - name: Run tests
-        run: pytest -ra --tb=short -v --maxfail=1 --durations=10 --cov=src/ariaops_mcp --cov-report=term-missing
-        continue-on-error: false
+        run: |
+          uv run pytest -ra --tb=short -v --maxfail=1 --durations=10 \
+            --cov=src/ariaops_mcp --cov-report=term-missing
         env:
           ARIAOPS_HOST: vrops.test.local
           ARIAOPS_USERNAME: testuser
@@ -60,17 +72,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        continue-on-error: false
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-        continue-on-error: false
 
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
-        continue-on-error: false
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Sync dev deps
+        run: uv sync --extra dev --frozen
 
       - name: Run pyright
-        run: pyright src/
-        continue-on-error: false
+        run: uv run pyright src/
