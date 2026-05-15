@@ -39,13 +39,14 @@ def _write_operations_enabled() -> bool:
 
 _tool_defs: list[types.Tool] | None = None
 _tool_handlers: dict[str, Callable[..., Awaitable[str]]] | None = None
+# Legacy compatibility hooks used by the in-repo test UI.
 _TOOL_DEFS: list[types.Tool] | None = None
 _TOOL_HANDLERS: dict[str, Callable[..., Awaitable[str]]] | None = None
 
 
 def _get_tool_registry() -> tuple[list[types.Tool], dict[str, Callable[..., Awaitable[str]]]]:
     """Build and cache the tool registry on first access (not at import time)."""
-    global _tool_defs, _tool_handlers, _TOOL_DEFS, _TOOL_HANDLERS
+    global _tool_defs, _tool_handlers
     if _tool_defs is None or _tool_handlers is None:
         defs: list[types.Tool] = []
         handlers: dict[str, Callable[..., Awaitable[str]]] = {}
@@ -57,8 +58,6 @@ def _get_tool_registry() -> tuple[list[types.Tool], dict[str, Callable[..., Awai
             handlers.update(write_ops.tool_handlers())
         _tool_defs = defs
         _tool_handlers = handlers
-        _TOOL_DEFS = defs
-        _TOOL_HANDLERS = handlers
     return _tool_defs, _tool_handlers
 
 
