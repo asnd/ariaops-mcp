@@ -39,11 +39,13 @@ def _write_operations_enabled() -> bool:
 
 _tool_defs: list[types.Tool] | None = None
 _tool_handlers: dict[str, Callable[..., Awaitable[str]]] | None = None
+_TOOL_DEFS: list[types.Tool] | None = None
+_TOOL_HANDLERS: dict[str, Callable[..., Awaitable[str]]] | None = None
 
 
 def _get_tool_registry() -> tuple[list[types.Tool], dict[str, Callable[..., Awaitable[str]]]]:
     """Build and cache the tool registry on first access (not at import time)."""
-    global _tool_defs, _tool_handlers
+    global _tool_defs, _tool_handlers, _TOOL_DEFS, _TOOL_HANDLERS
     if _tool_defs is None or _tool_handlers is None:
         defs: list[types.Tool] = []
         handlers: dict[str, Callable[..., Awaitable[str]]] = {}
@@ -55,7 +57,16 @@ def _get_tool_registry() -> tuple[list[types.Tool], dict[str, Callable[..., Awai
             handlers.update(write_ops.tool_handlers())
         _tool_defs = defs
         _tool_handlers = handlers
+        _TOOL_DEFS = defs
+        _TOOL_HANDLERS = handlers
     return _tool_defs, _tool_handlers
+
+
+def _build_registry() -> tuple[list[types.Tool], dict[str, Callable[..., Awaitable[str]]]]:
+    """Backward-compatible wrapper for the test UI registry bootstrap."""
+    if _TOOL_DEFS is not None and _TOOL_HANDLERS is not None:
+        return _TOOL_DEFS, _TOOL_HANDLERS
+    return _get_tool_registry()
 
 
 def _init_skills() -> None:

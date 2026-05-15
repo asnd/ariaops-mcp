@@ -147,5 +147,7 @@ def clear_settings_cache() -> None:
         import ariaops_mcp.server as _svr
         _svr._tool_defs = None
         _svr._tool_handlers = None
+        _svr._TOOL_DEFS = None
+        _svr._TOOL_HANDLERS = None
     except Exception:
         pass
