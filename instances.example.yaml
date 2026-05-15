@@ -1,0 +1,55 @@
+# AriaOps MCP Multi-Instance Configuration
+# This file defines vROps instances the MCP server can connect to.
+# Credentials are resolved from environment variables (not stored here).
+
+# Server-level settings
+default_instance: prod
+broadcast_timeout_seconds: 30
+broadcast_max_instances: 10
+
+instances:
+  prod:
+    host: vrops-prod.example.com
+    auth_source: local
+    environment: production
+    write_enabled: false
+    verify_ssl: true
+    description: "Production vROps (SE, DK, LT, EE)"
+    labels:
+      countries: [SE, DK, LT, EE]
+
+  prod-fi:
+    host: vrops-prod-fi.example.com
+    auth_source: local
+    environment: production
+    write_enabled: false
+    verify_ssl: true
+    description: "Production vROps Finland"
+    labels:
+      countries: [FI]
+
+  prod-no:
+    host: vrops-prod-no.example.com
+    auth_source: local
+    environment: production
+    write_enabled: false
+    verify_ssl: true
+    description: "Production vROps Norway"
+    labels:
+      countries: [NO]
+
+  preprod:
+    host: vrops-preprod.example.com
+    auth_source: local
+    environment: preproduction
+    write_enabled: false
+    verify_ssl: true
+    description: "Pre-production validation environment"
+
+  testbed:
+    host: vrops-lab.example.com
+    auth_source: local
+    environment: testbed
+    write_enabled: true
+    verify_ssl: false
+    description: "Lab/development sandbox (writes enabled)"

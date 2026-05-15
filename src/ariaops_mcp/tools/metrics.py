@@ -7,8 +7,7 @@ from urllib.parse import quote
 
 import mcp.types as types
 
-from ariaops_mcp.client import get_client
-from ariaops_mcp.tools._common import format_error
+from ariaops_mcp.tools._common import format_error, resolve_client
 
 VALID_ROLL_UP_TYPES = {"AVG", "MIN", "MAX", "SUM", "NONE"}
 VALID_INTERVAL_TYPES = {"MINUTES", "HOURS", "DAYS", "WEEKS", "MONTHS"}
@@ -129,7 +128,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 {"error": f"Invalid intervalType: {interval_type}. Must be one of {sorted(VALID_INTERVAL_TYPES)}"}
             )
         try:
-            data = await get_client().get(
+            client = await resolve_client(args)
+            data = await client.get(
                 f"/resources/{quote(args['id'], safe='')}/stats",
                 statKey=args.get("statKey"),
                 begin=args.get("begin"),
@@ -146,7 +146,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("id"):
             return json.dumps({"error": "Missing required argument: id"})
         try:
-            data = await get_client().get(
+            client = await resolve_client(args)
+            data = await client.get(
                 f"/resources/{quote(args['id'], safe='')}/stats/latest",
                 statKey=args.get("statKey"),
             )
@@ -170,6 +171,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 {"error": f"Invalid intervalType: {interval_type}. Must be one of {sorted(VALID_INTERVAL_TYPES)}"}
             )
         try:
+            client = await resolve_client(args)
             body: dict[str, Any] = {
                 "resourceId": [{"resourceId": rid} for rid in args["resourceIds"]],
                 "statKey": [{"key": k} for k in args["statKeys"]],
@@ -182,7 +184,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 body["rollUpType"] = roll_up_type
             if interval_type:
                 body["intervalType"] = interval_type
-            data = await get_client().post("/resources/stats/query", body)
+            data = await client.post("/resources/stats/query", body)
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
@@ -193,11 +195,12 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("statKeys"):
             return json.dumps({"error": "Missing required argument: statKeys"})
         try:
+            client = await resolve_client(args)
             body = {
                 "resourceId": [{"resourceId": rid} for rid in args["resourceIds"]],
                 "statKey": [{"key": k} for k in args["statKeys"]],
             }
-            data = await get_client().post("/resources/stats/latest/query", body)
+            data = await client.post("/resources/stats/latest/query", body)
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
@@ -206,7 +209,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("id"):
             return json.dumps({"error": "Missing required argument: id"})
         try:
-            data = await get_client().get(f"/resources/{quote(args['id'], safe='')}/statkeys")
+            client = await resolve_client(args)
+            data = await client.get(f"/resources/{quote(args['id'], safe='')}/statkeys")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
@@ -215,7 +219,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("id"):
             return json.dumps({"error": "Missing required argument: id"})
         try:
-            data = await get_client().get(
+            client = await resolve_client(args)
+            data = await client.get(
                 f"/resources/{quote(args['id'], safe='')}/stats/topn",
                 statKey=args.get("statKey"),
                 topN=args.get("topN", 5),
@@ -228,12 +233,13 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("resourceIds"):
             return json.dumps({"error": "Missing required argument: resourceIds"})
         try:
+            client = await resolve_client(args)
             body: dict[str, Any] = {
                 "resourceId": [{"resourceId": rid} for rid in args["resourceIds"]],
             }
             if args.get("propertyKeys"):
                 body["propertyKey"] = [{"key": k} for k in args["propertyKeys"]]
-            data = await get_client().post("/resources/properties/latest/query", body)
+            data = await client.post("/resources/properties/latest/query", body)
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)

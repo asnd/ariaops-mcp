@@ -8,8 +8,13 @@ from urllib.parse import quote
 
 import mcp.types as types
 
-from ariaops_mcp.client import get_client
-from ariaops_mcp.tools._common import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, format_error, truncate_list_response
+from ariaops_mcp.tools._common import (
+    PAGE_SIZE_DEFAULT,
+    PAGE_SIZE_MAX,
+    format_error,
+    resolve_client,
+    truncate_list_response,
+)
 
 
 def tool_definitions() -> list[types.Tool]:
@@ -88,9 +93,10 @@ def tool_definitions() -> list[types.Tool]:
 def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
     async def list_report_definitions(args: dict) -> str:
         try:
+            client = await resolve_client(args)
             page = max(0, int(args.get("page", 0)))
             page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
-            data = await get_client().get(
+            data = await client.get(
                 "/reportdefinitions",
                 page=page,
                 pageSize=page_size,
@@ -104,16 +110,18 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("id"):
             return json.dumps({"error": "Missing required argument: id"})
         try:
-            data = await get_client().get(f"/reportdefinitions/{quote(args['id'], safe='')}")
+            client = await resolve_client(args)
+            data = await client.get(f"/reportdefinitions/{quote(args['id'], safe='')}")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def list_reports(args: dict) -> str:
         try:
+            client = await resolve_client(args)
             page = max(0, int(args.get("page", 0)))
             page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
-            data = await get_client().get(
+            data = await client.get(
                 "/reports",
                 page=page,
                 pageSize=page_size,
@@ -127,7 +135,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("id"):
             return json.dumps({"error": "Missing required argument: id"})
         try:
-            data = await get_client().get(f"/reports/{quote(args['id'], safe='')}")
+            client = await resolve_client(args)
+            data = await client.get(f"/reports/{quote(args['id'], safe='')}")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
@@ -136,7 +145,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("id"):
             return json.dumps({"error": "Missing required argument: id"})
         try:
-            raw = await get_client().get_bytes(f"/reports/{quote(args['id'], safe='')}/download")
+            client = await resolve_client(args)
+            raw = await client.get_bytes(f"/reports/{quote(args['id'], safe='')}/download")
             encoded = base64.b64encode(raw).decode("utf-8")
             return json.dumps({"reportId": args["id"], "encoding": "base64", "content": encoded})
         except Exception as e:
@@ -146,7 +156,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("definitionId"):
             return json.dumps({"error": "Missing required argument: definitionId"})
         try:
-            data = await get_client().get(f"/reportdefinitions/{quote(args['definitionId'], safe='')}/schedules")
+            client = await resolve_client(args)
+            data = await client.get(f"/reportdefinitions/{quote(args['definitionId'], safe='')}/schedules")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)

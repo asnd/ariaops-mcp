@@ -1,4 +1,8 @@
-"""Aria Operations HTTP client with token lifecycle management and resilience."""
+"""Aria Operations HTTP client with token lifecycle management and resilience.
+
+Supports both legacy single-client mode (get_client()) and multi-instance
+client pool (ClientPool) for the multi-instance architecture.
+"""
 
 from __future__ import annotations
 
@@ -10,8 +14,7 @@ from typing import Any
 
 import httpx
 
-from ariaops_mcp.circuit_breaker import CircuitBreaker
-from ariaops_mcp.config import get_settings
+from ariaops_mcp.circuit_breaker import CircuitBreaker, CircuitState
 
 logger = logging.getLogger(__name__)
 
@@ -22,31 +25,162 @@ _BASE_BACKOFF_SECS = 0.5
 
 
 class AriaOpsClient:
-    def __init__(self) -> None:
-        settings = get_settings()
+    """HTTP client for a single Aria Operations instance."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        auth_source: str | None = None,
+        verify_ssl: bool | None = None,
+        max_concurrent_requests: int | None = None,
+        request_deadline: float | None = None,
+        cb_failure_threshold: int | None = None,
+        cb_recovery_timeout: int | None = None,
+        cb_success_threshold: int | None = None,
+        instance_name: str = "default",
+    ) -> None:
+        # When no explicit params provided, read from settings (backward compat)
+        if base_url is None:
+            try:
+                from ariaops_mcp.config import get_settings
+                settings = get_settings()
+                base_url = settings.base_url
+                username = username or settings.username
+                password = password or settings.password
+                auth_source = auth_source if auth_source is not None else settings.auth_source
+                verify_ssl = verify_ssl if verify_ssl is not None else settings.verify_ssl
+                max_concurrent_requests = (
+                    max_concurrent_requests if max_concurrent_requests is not None
+                    else settings.max_concurrent_requests
+                )
+                request_deadline = (
+                    request_deadline if request_deadline is not None
+                    else settings.request_deadline
+                )
+                cb_failure_threshold = (
+                    cb_failure_threshold if cb_failure_threshold is not None
+                    else settings.cb_failure_threshold
+                )
+                cb_recovery_timeout = (
+                    cb_recovery_timeout if cb_recovery_timeout is not None
+                    else settings.cb_recovery_timeout
+                )
+                cb_success_threshold = (
+                    cb_success_threshold if cb_success_threshold is not None
+                    else settings.cb_success_threshold
+                )
+            except Exception:
+                pass
+
+        # Apply defaults for any still-None values
+        auth_source = auth_source or "local"
+        verify_ssl = verify_ssl if verify_ssl is not None else True
+        max_concurrent_requests = max_concurrent_requests or 10
+        request_deadline = request_deadline or 120.0
+        cb_failure_threshold = cb_failure_threshold or 5
+        cb_recovery_timeout = cb_recovery_timeout or 30
+        cb_success_threshold = cb_success_threshold or 2
+
+        # Store connection params for lazy initialization
+        self._base_url = base_url
+        self._username = username
+        self._password = password
+        self._auth_source = auth_source
+        self._verify_ssl = verify_ssl
+        self._instance_name = instance_name
+
         self._token: str | None = None
         self._token_expiry: float = 0.0
         self._http: httpx.AsyncClient | None = None
         self._token_lock = asyncio.Lock()
-        self._semaphore = asyncio.Semaphore(settings.max_concurrent_requests)
+        self._semaphore = asyncio.Semaphore(max_concurrent_requests)
         self._circuit_breaker = CircuitBreaker(
-            failure_threshold=settings.cb_failure_threshold,
-            recovery_timeout=settings.cb_recovery_timeout,
-            success_threshold=settings.cb_success_threshold,
+            failure_threshold=cb_failure_threshold,
+            recovery_timeout=cb_recovery_timeout,
+            success_threshold=cb_success_threshold,
         )
-        self._request_deadline = settings.request_deadline
+        self._request_deadline = request_deadline
+        self._last_request_time: float = 0.0
+
+    @classmethod
+    def from_settings(cls) -> AriaOpsClient:
+        """Create a client from legacy Settings (backward compatibility).
+        
+        Note: AriaOpsClient() with no args also reads from settings,
+        but this factory is explicit and used by get_client().
+        """
+        return cls()
+
+    @classmethod
+    def from_instance_config(cls, instance_config: Any) -> AriaOpsClient:
+        """Create a client from an InstanceConfig object."""
+        from ariaops_mcp.instances import InstanceConfig
+
+        assert isinstance(instance_config, InstanceConfig)
+
+        # Get server-level defaults for resilience settings
+        try:
+            from ariaops_mcp.config import get_settings
+            settings = get_settings()
+            max_concurrent = settings.max_concurrent_requests
+            deadline = settings.request_deadline
+            default_cb_failure = settings.cb_failure_threshold
+            default_cb_recovery = settings.cb_recovery_timeout
+            default_cb_success = settings.cb_success_threshold
+        except Exception:
+            max_concurrent = 10
+            deadline = 120.0
+            default_cb_failure = 5
+            default_cb_recovery = 30
+            default_cb_success = 2
+
+        return cls(
+            base_url=instance_config.base_url,
+            username=instance_config.get_username(),
+            password=instance_config.get_password(),
+            auth_source=instance_config.get_auth_source(),
+            verify_ssl=instance_config.verify_ssl,
+            max_concurrent_requests=max_concurrent,
+            request_deadline=deadline,
+            cb_failure_threshold=instance_config.cb_failure_threshold or default_cb_failure,
+            cb_recovery_timeout=instance_config.cb_recovery_timeout or default_cb_recovery,
+            cb_success_threshold=instance_config.cb_success_threshold or default_cb_success,
+            instance_name=instance_config.name,
+        )
+
+    @property
+    def instance_name(self) -> str:
+        return self._instance_name
 
     @property
     def circuit_breaker(self) -> CircuitBreaker:
         """Expose circuit breaker for testing and observability."""
         return self._circuit_breaker
 
+    @property
+    def last_request_time(self) -> float:
+        """Epoch time of the last successful request."""
+        return self._last_request_time
+
+    @property
+    def has_token(self) -> bool:
+        """Whether the client currently holds a valid token."""
+        return self._token is not None and time.time() < self._token_expiry
+
     async def _get_http(self) -> httpx.AsyncClient:
         if self._http is None:
-            settings = get_settings()
+            if self._base_url is None:
+                # Legacy fallback
+                from ariaops_mcp.config import get_settings
+                settings = get_settings()
+                self._base_url = settings.base_url
+                self._verify_ssl = settings.verify_ssl
             self._http = httpx.AsyncClient(
-                base_url=settings.base_url,
-                verify=settings.verify_ssl,
+                base_url=self._base_url,
+                verify=self._verify_ssl,
                 timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
                 headers={"Content-Type": "application/json", "Accept": "application/json"},
             )
@@ -62,14 +196,26 @@ class AriaOpsClient:
             if self._token and now < self._token_expiry - _TOKEN_REFRESH_BUFFER_SECS:
                 return
 
-            logger.debug("Acquiring Aria Operations auth token")
+            # Resolve credentials
+            username = self._username
+            password = self._password
+            auth_source = self._auth_source
+
+            if username is None or password is None:
+                from ariaops_mcp.config import get_settings
+                settings = get_settings()
+                username = username or settings.username
+                password = password or settings.password
+                auth_source = auth_source or settings.auth_source
+
+            logger.debug("Acquiring Aria Operations auth token for instance '%s'", self._instance_name)
             resp = await self._request_with_retry(
                 "POST",
                 "/auth/token/acquire",
                 json={
-                    "username": get_settings().username,
-                    "password": get_settings().password,
-                    "authSource": get_settings().auth_source,
+                    "username": username,
+                    "password": password,
+                    "authSource": auth_source,
                 },
             )
             data = resp.json()
@@ -77,7 +223,7 @@ class AriaOpsClient:
             # validity is in ms since epoch; fall back to 1-hour TTL if missing
             validity_ms = data.get("validity")
             self._token_expiry = validity_ms / 1000.0 if validity_ms else time.time() + 3600
-            logger.debug("Token acquired, expires at %s", self._token_expiry)
+            logger.debug("Token acquired for '%s', expires at %s", self._instance_name, self._token_expiry)
 
     def _invalidate_token(self) -> None:
         """Clear cached token so next request triggers reacquisition."""
@@ -101,7 +247,8 @@ class AriaOpsClient:
 
                 backoff_secs = _BASE_BACKOFF_SECS * (2**attempt)
                 logger.warning(
-                    "%s %s returned %s, retrying in %.1fs (%s/%s)",
+                    "[%s] %s %s returned %s, retrying in %.1fs (%s/%s)",
+                    self._instance_name,
                     method,
                     path,
                     resp.status_code,
@@ -115,7 +262,8 @@ class AriaOpsClient:
                 if exc.response.status_code in _RETRYABLE_STATUS_CODES and attempt < _MAX_ATTEMPTS - 1:
                     backoff_secs = _BASE_BACKOFF_SECS * (2**attempt)
                     logger.warning(
-                        "%s %s failed with %s, retrying in %.1fs (%s/%s)",
+                        "[%s] %s %s failed with %s, retrying in %.1fs (%s/%s)",
+                        self._instance_name,
                         method,
                         path,
                         exc.response.status_code,
@@ -132,7 +280,8 @@ class AriaOpsClient:
                 if attempt < _MAX_ATTEMPTS - 1:
                     backoff_secs = _BASE_BACKOFF_SECS * (2**attempt)
                     logger.warning(
-                        "%s %s request error: %s, retrying in %.1fs (%s/%s)",
+                        "[%s] %s %s request error: %s, retrying in %.1fs (%s/%s)",
+                        self._instance_name,
                         method,
                         path,
                         exc,
@@ -153,7 +302,7 @@ class AriaOpsClient:
         self, method: str, path: str, body: dict[str, Any] | None = None, response_type: str = "json", **params: Any
     ) -> Any:
         """Shared helper: ensures token, makes request with resilience.
-        
+
         Args:
             response_type: Either "json" (default) or "content" for raw bytes.
         """
@@ -184,7 +333,7 @@ class AriaOpsClient:
         except httpx.HTTPStatusError as exc:
             # 401 Unauthorized — invalidate token and retry once
             if exc.response.status_code == 401:
-                logger.warning("Received 401, invalidating token and reacquiring")
+                logger.warning("[%s] Received 401, invalidating token and reacquiring", self._instance_name)
                 self._invalidate_token()
                 await self._ensure_token()
                 kwargs["headers"] = {"Authorization": f"vRealizeOpsToken {self._token}"}
@@ -204,8 +353,9 @@ class AriaOpsClient:
             raise
 
         duration_ms = (time.monotonic() - start) * 1000
-        logger.debug("%s %s -> %s (%.0fms)", method, path, resp.status_code, duration_ms)
+        logger.debug("[%s] %s %s -> %s (%.0fms)", self._instance_name, method, path, resp.status_code, duration_ms)
         self._circuit_breaker.record_success()
+        self._last_request_time = time.time()
 
         # Return raw bytes or JSON based on response_type
         if response_type == "content":
@@ -238,26 +388,124 @@ class AriaOpsClient:
                     "/auth/token/release",
                     headers={"Authorization": f"vRealizeOpsToken {self._token}"},
                 )
-                logger.debug("Token released")
+                logger.debug("[%s] Token released", self._instance_name)
             except Exception as e:
-                logger.warning("Failed to release token: %s", e)
+                logger.warning("[%s] Failed to release token: %s", self._instance_name, e)
         if self._http:
             await self._http.aclose()
             self._http = None
 
 
-# Module-level singleton
+# ── Client Pool ───────────────────────────────────────────────────────────────
+
+
+class ClientPool:
+    """Pool of AriaOpsClient instances, one per configured vROps instance.
+
+    Clients are created lazily on first access and cached.
+    """
+
+    def __init__(self) -> None:
+        self._clients: dict[str, AriaOpsClient] = {}
+        self._lock = asyncio.Lock()
+
+    async def get_client(self, instance_name: str) -> AriaOpsClient:
+        """Get or create a client for the specified instance."""
+        if instance_name in self._clients:
+            return self._clients[instance_name]
+
+        async with self._lock:
+            # Double-check after acquiring lock
+            if instance_name in self._clients:
+                return self._clients[instance_name]
+
+            from ariaops_mcp.instances import get_instance_registry
+
+            registry = get_instance_registry()
+            config = registry.get(instance_name)
+            if config is None:
+                raise ValueError(
+                    f"Instance '{instance_name}' not found in registry. "
+                    f"Available: {registry.instance_names()}"
+                )
+
+            client = AriaOpsClient.from_instance_config(config)
+            self._clients[instance_name] = client
+            logger.info("Created client for instance '%s' (%s)", instance_name, config.host)
+            return client
+
+    def get_client_sync(self, instance_name: str) -> AriaOpsClient | None:
+        """Get a client if already created (non-async, for status checks)."""
+        return self._clients.get(instance_name)
+
+    async def shutdown(self) -> None:
+        """Release all tokens and close all HTTP clients."""
+        for name, client in self._clients.items():
+            try:
+                await client.close()
+                logger.debug("Closed client for instance '%s'", name)
+            except Exception as e:
+                logger.warning("Error closing client for instance '%s': %s", name, e)
+        self._clients.clear()
+
+    def active_instances(self) -> list[str]:
+        """Return names of instances with active clients."""
+        return list(self._clients.keys())
+
+    def get_health(self, instance_name: str) -> dict[str, Any]:
+        """Get health status for an instance client."""
+        client = self._clients.get(instance_name)
+        if client is None:
+            return {"status": "not_initialized", "instance": instance_name}
+
+        cb = client.circuit_breaker
+        return {
+            "instance": instance_name,
+            "status": "healthy" if cb.state == CircuitState.CLOSED else cb.state.value,
+            "circuit_breaker": cb.state.value,
+            "has_token": client.has_token,
+            "last_request_time": client.last_request_time,
+        }
+
+
+# ── Module-level singleton pool ───────────────────────────────────────────────
+
+_pool: ClientPool | None = None
+
+
+def get_client_pool() -> ClientPool:
+    """Get or create the module-level client pool singleton."""
+    global _pool
+    if _pool is None:
+        _pool = ClientPool()
+    return _pool
+
+
+def reset_client_pool() -> None:
+    """Reset the client pool (for testing)."""
+    global _pool
+    _pool = None
+
+
+# ── Backward-compatible get_client() ─────────────────────────────────────────
+
 _client: AriaOpsClient | None = None
 _client_override: ContextVar[AriaOpsClient | None] = ContextVar("ariaops_client_override", default=None)
 
 
 def get_client() -> AriaOpsClient:
+    """Get the default AriaOpsClient (backward compatibility).
+
+    Resolution:
+    1. ContextVar override (for testing / session isolation)
+    2. Module-level singleton (created from Settings)
+    """
     override = _client_override.get()
     if override is not None:
         return override
     global _client
     if _client is None:
-        _client = AriaOpsClient()
+        _client = AriaOpsClient.from_settings()
     return _client
 
 

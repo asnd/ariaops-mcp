@@ -17,7 +17,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from ariaops_mcp.client import get_client
+from ariaops_mcp.client import get_client, get_client_pool
 from ariaops_mcp.config import Settings, get_settings
 from ariaops_mcp.http_auth import JWTTokenVerifier
 from ariaops_mcp.logging_config import configure_logging
@@ -93,6 +93,7 @@ def create_http_app(
             try:
                 yield
             finally:
+                await get_client_pool().shutdown()
                 await get_client().close()
 
     return Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
@@ -112,6 +113,7 @@ def main() -> None:
             app = create_http_app(server=server, settings=s)
 
             async def shutdown() -> None:
+                await get_client_pool().shutdown()
                 await get_client().close()
 
             for sig in (signal.SIGTERM, signal.SIGINT):
@@ -131,7 +133,7 @@ def main() -> None:
         from mcp.server.stdio import stdio_server
 
         async def run_stdio() -> None:
-            from ariaops_mcp.client import get_client
+            from ariaops_mcp.client import get_client, get_client_pool
 
             try:
                 async with stdio_server() as (read_stream, write_stream):
@@ -141,6 +143,7 @@ def main() -> None:
                         server.create_initialization_options(),
                     )
             finally:
+                await get_client_pool().shutdown()
                 await get_client().close()
 
         asyncio.run(run_stdio())

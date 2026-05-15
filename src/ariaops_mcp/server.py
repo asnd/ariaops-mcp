@@ -17,7 +17,7 @@ from ariaops_mcp.logging_config import new_correlation_id
 from ariaops_mcp.skills.executor import execute_skill as _run_skill_orchestration
 from ariaops_mcp.skills.prompts import render_prompt, skill_to_prompt
 from ariaops_mcp.skills.registry import get_registry
-from ariaops_mcp.tools import alerts, capacity, discovery, metrics, reports, resources, write_ops
+from ariaops_mcp.tools import alerts, capacity, discovery, meta, metrics, reports, resources, write_ops
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,12 @@ READ_ONLY_MODULES = [resources, alerts, metrics, capacity, reports, discovery]
 # Write-operation tool names (always known, independent of whether they're enabled).
 _WRITE_TOOL_NAMES: set[str] = {t.name for t in write_ops.tool_definitions()}
 
+# Instance parameter schema to inject into every tool
+_INSTANCE_PARAM = {
+    "type": "string",
+    "description": "Target vROps instance name (omit to use session/server default)",
+}
+
 
 def _write_operations_enabled() -> bool:
     try:
@@ -33,6 +39,27 @@ def _write_operations_enabled() -> bool:
     except Exception:
         logger.debug("Settings unavailable while checking write operations; defaulting to disabled.")
         return False
+
+
+def _multi_instance_configured() -> bool:
+    """Check if multi-instance mode is active."""
+    try:
+        from ariaops_mcp.instances import get_instance_registry
+        registry = get_instance_registry()
+        return registry.is_loaded and len(registry.config.instances) > 0
+    except Exception:
+        return False
+
+
+def _inject_instance_param(tool: types.Tool) -> types.Tool:
+    """Add optional 'instance' parameter to a tool's input schema."""
+    schema = tool.inputSchema
+    if isinstance(schema, dict):
+        props = schema.get("properties", {})
+        if "instance" not in props:
+            props["instance"] = _INSTANCE_PARAM
+            schema["properties"] = props
+    return tool
 
 
 # --- Lazy tool registry (avoids import-time coupling to env vars) ---
@@ -56,6 +83,11 @@ def _get_tool_registry() -> tuple[list[types.Tool], dict[str, Callable[..., Awai
         if _write_operations_enabled():
             defs.extend(write_ops.tool_definitions())
             handlers.update(write_ops.tool_handlers())
+
+        # Inject 'instance' parameter into all tools when multi-instance is active
+        if _multi_instance_configured():
+            defs = [_inject_instance_param(t) for t in defs]
+
         _tool_defs = defs
         _tool_handlers = handlers
     return _tool_defs, _tool_handlers
@@ -82,6 +114,15 @@ def _init_skills() -> None:
             logger.info("Skills loaded from %s (%d skills)", settings.skills_dir, len(registry.list()))
     except Exception:
         logger.exception("Failed to initialize skills; server will start without skill support")
+
+
+def _init_instances() -> None:
+    """Initialize the instance registry. Fails gracefully."""
+    try:
+        from ariaops_mcp.instances import get_instance_registry
+        get_instance_registry()
+    except Exception:
+        logger.exception("Failed to initialize instance registry; multi-instance support disabled")
 
 
 # --- Skill meta-tool definitions (always exposed when ARIAOPS_SKILLS_DIR is configured) ---
@@ -206,6 +247,9 @@ _SKILL_TOOL_HANDLERS: dict[str, Callable[..., Awaitable[str]]] = {
     "reload_skills": _handle_reload_skills,
 }
 
+# Meta-tool names that need special dispatch
+_META_TOOL_NAMES = {"list_instances", "select_instance", "instance_health", "query_all_instances"}
+
 
 def _skills_configured() -> bool:
     """Check if skills directory is configured (regardless of whether skills loaded)."""
@@ -217,6 +261,7 @@ def _skills_configured() -> bool:
 
 def create_server() -> Server:
     """Create and configure the MCP server with all handlers."""
+    _init_instances()
     _init_skills()
 
     server = Server("ariaops-mcp")
@@ -228,12 +273,59 @@ def create_server() -> Server:
         # Always expose skill meta-tools when skills_dir is configured.
         if _skills_configured():
             tools.extend(_skill_tool_defs())
+        # Always expose instance meta-tools when multi-instance is configured
+        if _multi_instance_configured():
+            tools.extend(meta.tool_definitions())
         return tools
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict | None) -> list[types.TextContent]:
         cid = new_correlation_id()
         start = time.monotonic()
+
+        # Instance meta-tool dispatch
+        if name in _META_TOOL_NAMES and _multi_instance_configured():
+            try:
+                if name == "query_all_instances":
+                    _, tool_handlers = _get_tool_registry()
+                    result = await meta.handle_query_all_instances(
+                        arguments or {},
+                        tool_handlers,
+                        _WRITE_TOOL_NAMES,
+                    )
+                else:
+                    meta_handlers = meta.tool_handlers()
+                    handler = meta_handlers.get(name)
+                    if handler:
+                        result = await handler(arguments or {})
+                    else:
+                        raise ValueError(f"Unknown meta-tool: {name}")
+            except CircuitOpenError as e:
+                result = json.dumps({
+                    "error": "Service unavailable",
+                    "detail": str(e),
+                    "retry_after": e.retry_after,
+                    "correlation_id": cid,
+                })
+            except TimeoutError:
+                result = json.dumps({
+                    "error": "Request deadline exceeded",
+                    "detail": "Operation timed out",
+                    "correlation_id": cid,
+                })
+            except Exception as e:
+                logger.exception("Meta-tool '%s' failed unexpectedly", name)
+                result = json.dumps({"error": "Unexpected error", "detail": str(e), "correlation_id": cid})
+
+            duration_ms = (time.monotonic() - start) * 1000
+            logger.info(
+                "tool_call: %s [%s] %.0fms",
+                name,
+                cid,
+                duration_ms,
+                extra={"event": "tool_call", "tool": name, "duration_ms": duration_ms},
+            )
+            return [types.TextContent(type="text", text=result)]
 
         # Skill meta-tool dispatch — reject if skills not configured.
         if name in _SKILL_TOOL_HANDLERS:

@@ -1,4 +1,8 @@
-"""OAuth 2.0 bearer-token verification for the HTTP MCP transport."""
+"""OAuth 2.0 bearer-token verification for the HTTP MCP transport.
+
+Includes instance-level scope enforcement for multi-instance access control.
+Scope format: ariaops:{instance}:{access} where access is 'read' or 'write'.
+"""
 
 from __future__ import annotations
 
@@ -30,6 +34,18 @@ def _extract_scopes(claims: dict[str, Any]) -> list[str]:
     if isinstance(raw_scopes, list):
         return [str(scope) for scope in raw_scopes if str(scope)]
     return []
+
+
+def extract_instance_scopes(scopes: list[str]) -> set[str]:
+    """Extract ariaops-specific scopes from the full scope list.
+
+    Returns only scopes matching the pattern 'ariaops:{instance}:{access}'.
+    """
+    result = set()
+    for scope in scopes:
+        if scope.startswith("ariaops:") and scope.count(":") == 2:
+            result.add(scope)
+    return result
 
 
 class JWTTokenVerifier(TokenVerifier):

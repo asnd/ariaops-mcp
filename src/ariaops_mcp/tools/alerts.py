@@ -7,8 +7,13 @@ from urllib.parse import quote
 
 import mcp.types as types
 
-from ariaops_mcp.client import get_client
-from ariaops_mcp.tools._common import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, format_error, truncate_list_response
+from ariaops_mcp.tools._common import (
+    PAGE_SIZE_DEFAULT,
+    PAGE_SIZE_MAX,
+    format_error,
+    resolve_client,
+    truncate_list_response,
+)
 
 VALID_STATUS = {"ACTIVE", "CANCELLED", "SUSPENDED"}
 VALID_CRITICALITY = {"CRITICAL", "IMMEDIATE", "WARNING", "INFORMATION"}
@@ -124,9 +129,10 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 {"error": f"Invalid criticality: {criticality}. Must be one of {sorted(VALID_CRITICALITY)}"}
             )
         try:
+            client = await resolve_client(args)
             page = max(0, int(args.get("page", 0)))
             page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
-            data = await get_client().get(
+            data = await client.get(
                 "/alerts",
                 status=status,
                 criticality=criticality,
@@ -143,13 +149,15 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("id"):
             return json.dumps({"error": "Missing required argument: id"})
         try:
-            data = await get_client().get(f"/alerts/{quote(args['id'], safe='')}")
+            client = await resolve_client(args)
+            data = await client.get(f"/alerts/{quote(args['id'], safe='')}")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def query_alerts(args: dict) -> str:
         try:
+            client = await resolve_client(args)
             page = max(0, int(args.get("page", 0)))
             page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
             body: dict[str, Any] = {}
@@ -159,7 +167,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 body["alertCriticality"] = args["alertCriticality"]
             if args.get("alertStatus"):
                 body["alertStatus"] = args["alertStatus"]
-            data = await get_client().post(
+            data = await client.post(
                 "/alerts/query",
                 body,
                 page=page,
@@ -174,16 +182,18 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("id"):
             return json.dumps({"error": "Missing required argument: id"})
         try:
-            data = await get_client().get(f"/alerts/{quote(args['id'], safe='')}/notes")
+            client = await resolve_client(args)
+            data = await client.get(f"/alerts/{quote(args['id'], safe='')}/notes")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def list_alert_definitions(args: dict) -> str:
         try:
+            client = await resolve_client(args)
             page = max(0, int(args.get("page", 0)))
             page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
-            data = await get_client().get(
+            data = await client.get(
                 "/alertdefinitions",
                 page=page,
                 pageSize=page_size,
@@ -197,14 +207,16 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("id"):
             return json.dumps({"error": "Missing required argument: id"})
         try:
-            data = await get_client().get(f"/alertdefinitions/{quote(args['id'], safe='')}")
+            client = await resolve_client(args)
+            data = await client.get(f"/alertdefinitions/{quote(args['id'], safe='')}")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def get_contributing_symptoms(args: dict) -> str:
         try:
-            data = await get_client().get("/alerts/contributingsymptoms")
+            client = await resolve_client(args)
+            data = await client.get("/alerts/contributingsymptoms")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)

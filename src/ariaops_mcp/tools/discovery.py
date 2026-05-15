@@ -6,8 +6,13 @@ from typing import Any
 
 import mcp.types as types
 
-from ariaops_mcp.client import get_client
-from ariaops_mcp.tools._common import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, format_error, truncate_list_response
+from ariaops_mcp.tools._common import (
+    PAGE_SIZE_DEFAULT,
+    PAGE_SIZE_MAX,
+    format_error,
+    resolve_client,
+    truncate_list_response,
+)
 
 
 def tool_definitions() -> list[types.Tool]:
@@ -54,23 +59,26 @@ def tool_definitions() -> list[types.Tool]:
 def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
     async def get_version(args: dict) -> str:
         try:
-            data = await get_client().get("/versions/current")
+            client = await resolve_client(args)
+            data = await client.get("/versions/current")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def list_collectors(args: dict) -> str:
         try:
-            data = await get_client().get("/collectors")
+            client = await resolve_client(args)
+            data = await client.get("/collectors")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def list_symptoms(args: dict) -> str:
         try:
+            client = await resolve_client(args)
             page = max(0, int(args.get("page", 0)))
             page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
-            data = await get_client().get(
+            data = await client.get(
                 "/symptomdefinitions",
                 page=page,
                 pageSize=page_size,
@@ -82,7 +90,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
 
     async def list_recommendations(args: dict) -> str:
         try:
-            data = await get_client().get("/recommendations")
+            client = await resolve_client(args)
+            data = await client.get("/recommendations")
             data = truncate_list_response(data, "recommendations")
             return json.dumps(data, indent=2)
         except Exception as e:
@@ -90,7 +99,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
 
     async def list_supermetrics(args: dict) -> str:
         try:
-            data = await get_client().get("/supermetrics")
+            client = await resolve_client(args)
+            data = await client.get("/supermetrics")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)

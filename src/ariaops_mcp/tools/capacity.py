@@ -11,8 +11,7 @@ from urllib.parse import quote
 import httpx
 import mcp.types as types
 
-from ariaops_mcp.client import get_client
-from ariaops_mcp.tools._common import format_error
+from ariaops_mcp.tools._common import format_error, resolve_client
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +129,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
     async def get_capacity_remaining(args: dict) -> str:
         if not args.get("id"):
             return json.dumps({"error": "Missing required argument: id"})
-        client = get_client()
+        client = await resolve_client(args)
         results: dict[str, Any] = {"resourceId": args["id"], "capacityStats": {}}
         rid = quote(args["id"], safe="")
         for stat_key in CAPACITY_STAT_KEYS:
@@ -153,7 +152,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
 
     async def get_capacity_overview(args: dict) -> str:
         try:
-            client = get_client()
+            client = await resolve_client(args)
             adapter_kind = args.get("adapterKind", "VMWARE")
             resource_kind = args.get("resourceKind", "ClusterComputeResource")
 
@@ -200,7 +199,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
 
     async def list_policies(args: dict) -> str:
         try:
-            data = await get_client().get("/policies")
+            client = await resolve_client(args)
+            data = await client.get("/policies")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
@@ -219,7 +219,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         history_days = max(7, min(int(args.get("history_days", 30)), 365))
         
         try:
-            client = get_client()
+            client = await resolve_client(args)
 
             # Get historical stats for the metric
             end_time = int(time.time() * 1000)
@@ -379,7 +379,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         period_days = max(7, min(int(args.get("period_days", 30)), 365))
         
         try:
-            client = get_client()
+            client = await resolve_client(args)
 
             # Get historical stats for the metric
             end_time = int(time.time() * 1000)

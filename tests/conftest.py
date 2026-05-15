@@ -18,6 +18,11 @@ os.environ.setdefault("ARIAOPS_PASSWORD", "testpass")
 def reset_client():
     """Reset the module-level client, registry, and settings cache before each test."""
     client_module._client = None
+    # Reset client pool
+    client_module.reset_client_pool()
+    # Reset instance registry
+    from ariaops_mcp.instances import reset_instance_registry
+    reset_instance_registry()
     # Reset skill registry singleton to avoid cross-test pollution.
     from ariaops_mcp.skills.registry import reset_registry
     reset_registry()
@@ -28,6 +33,8 @@ def reset_client():
     clear_settings_cache()
     yield
     client_module._client = None
+    client_module.reset_client_pool()
+    reset_instance_registry()
     reset_registry()
     server_module._tool_defs = None
     server_module._tool_handlers = None

@@ -10,9 +10,9 @@ from pydantic_settings import BaseSettings, NoDecode
 
 
 class Settings(BaseSettings):
-    host: str = Field(..., alias="ARIAOPS_HOST")
-    username: str = Field(..., alias="ARIAOPS_USERNAME")
-    password: str = Field(..., alias="ARIAOPS_PASSWORD")
+    host: str = Field("localhost", alias="ARIAOPS_HOST")
+    username: str = Field("", alias="ARIAOPS_USERNAME")
+    password: str = Field("", alias="ARIAOPS_PASSWORD")
     auth_source: str = Field("local", alias="ARIAOPS_AUTH_SOURCE")
     verify_ssl: bool = Field(True, alias="ARIAOPS_VERIFY_SSL")
     transport: Literal["stdio", "http"] = Field("stdio", alias="ARIAOPS_TRANSPORT")
@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field("INFO", alias="ARIAOPS_LOG_LEVEL")
     log_format: Literal["text", "json"] = Field("text", alias="ARIAOPS_LOG_FORMAT")
     enable_write_operations: bool = Field(False, alias="ARIAOPS_ENABLE_WRITE_OPERATIONS")
+
+    # Multi-instance support
+    instances_file: str | None = Field(None, alias="ARIAOPS_INSTANCES_FILE")
+    default_instance: str | None = Field(None, alias="ARIAOPS_DEFAULT_INSTANCE")
     http_oauth_enabled: bool = Field(False, alias="ARIAOPS_HTTP_OAUTH_ENABLED")
     http_oauth_issuer_url: AnyHttpUrl | None = Field(None, alias="ARIAOPS_HTTP_OAUTH_ISSUER_URL")
     http_oauth_resource_server_url: AnyHttpUrl | None = Field(None, alias="ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL")

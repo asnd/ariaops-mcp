@@ -14,8 +14,7 @@ from urllib.parse import quote
 
 import mcp.types as types
 
-from ariaops_mcp.client import get_client
-from ariaops_mcp.tools._common import format_error, write_guard
+from ariaops_mcp.tools._common import format_error, resolve_client, write_guard
 
 # ── constants ────────────────────────────────────────────────────────────────
 
@@ -475,7 +474,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
     # ── Alerts ────────────────────────────────────────────────────────────────
 
     async def modify_alerts(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         alert_ids = args.get("alertIds")
         if not alert_ids:
@@ -487,13 +486,13 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
             )
         try:
             body: dict[str, Any] = {"alertIds": alert_ids, "alertAction": action}
-            data = await get_client().post("/alerts", body)
+            data = await (await resolve_client(args)).post("/alerts", body)
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def add_alert_note(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         alert_id = args.get("id")
         if not alert_id:
@@ -502,7 +501,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
         if (msg := _validate_note(note)):
             return json.dumps({"error": msg})
         try:
-            data = await get_client().post(
+            data = await (await resolve_client(args)).post(
                 f"/alerts/{quote(alert_id, safe='')}/notes",
                 {"note": note},
             )
@@ -511,7 +510,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
             return format_error(e)
 
     async def delete_alert_note(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         alert_id = args.get("id")
         note_id = args.get("noteId")
@@ -520,7 +519,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
         if not note_id:
             return json.dumps({"error": "Missing required argument: noteId"})
         try:
-            data = await get_client().delete(
+            data = await (await resolve_client(args)).delete(
                 f"/alerts/{quote(alert_id, safe='')}/notes/{quote(note_id, safe='')}"
             )
             return json.dumps(data if data else {"status": "deleted"}, indent=2)
@@ -528,7 +527,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
             return format_error(e)
 
     async def delete_canceled_alerts(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         body: dict[str, Any] = {}
         if args.get("alertIds"):
@@ -538,7 +537,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
         if args.get("olderThanDays") is not None:
             body["olderThanDays"] = int(args["olderThanDays"])
         try:
-            data = await get_client().post("/alerts/bulk/delete", body)
+            data = await (await resolve_client(args)).post("/alerts/bulk/delete", body)
             return json.dumps(data if data else {"status": "deleted"}, indent=2)
         except Exception as e:
             return format_error(e)
@@ -546,25 +545,25 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
     # ── Resource maintenance ───────────────────────────────────────────────────
 
     async def mark_resources_maintained(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         resource_ids = args.get("resourceIds")
         if not resource_ids:
             return json.dumps({"error": "Missing required argument: resourceIds"})
         try:
-            data = await get_client().put("/resources/maintained", {"resourceIds": resource_ids})
+            data = await (await resolve_client(args)).put("/resources/maintained", {"resourceIds": resource_ids})
             return json.dumps(data if data else {"status": "ok"}, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def unmark_resources_maintained(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         resource_ids = args.get("resourceIds")
         if not resource_ids:
             return json.dumps({"error": "Missing required argument: resourceIds"})
         try:
-            data = await get_client().delete("/resources/maintained", {"resourceIds": resource_ids})
+            data = await (await resolve_client(args)).delete("/resources/maintained", {"resourceIds": resource_ids})
             return json.dumps(data if data else {"status": "ok"}, indent=2)
         except Exception as e:
             return format_error(e)
@@ -572,7 +571,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
     # ── Maintenance schedules ─────────────────────────────────────────────────
 
     async def create_maintenance_schedule(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         for field in ("name", "resourceIds", "startTime", "endTime"):
             if not args.get(field) and args.get(field) != 0:
@@ -586,13 +585,13 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
         if args.get("recurrence"):
             body["recurrence"] = args["recurrence"]
         try:
-            data = await get_client().post("/maintenanceschedules", body)
+            data = await (await resolve_client(args)).post("/maintenanceschedules", body)
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def update_maintenance_schedule(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         for field in ("id", "name", "resourceIds", "startTime", "endTime"):
             if not args.get(field) and args.get(field) != 0:
@@ -607,19 +606,19 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
         if args.get("recurrence"):
             body["recurrence"] = args["recurrence"]
         try:
-            data = await get_client().put("/maintenanceschedules", body)
+            data = await (await resolve_client(args)).put("/maintenanceschedules", body)
             return json.dumps(data if data else {"status": "ok"}, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def delete_maintenance_schedule(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         ids = args.get("ids")
         if not ids:
             return json.dumps({"error": "Missing required argument: ids"})
         try:
-            data = await get_client().delete("/maintenanceschedules", {"ids": ids})
+            data = await (await resolve_client(args)).delete("/maintenanceschedules", {"ids": ids})
             return json.dumps(data if data else {"status": "deleted"}, indent=2)
         except Exception as e:
             return format_error(e)
@@ -627,7 +626,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
     # ── Reports ───────────────────────────────────────────────────────────────
 
     async def generate_report(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         for field in ("reportDefinitionId", "resourceId"):
             if not args.get(field):
@@ -637,25 +636,25 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
             "resourceId": args["resourceId"],
         }
         try:
-            data = await get_client().post("/reports", body)
+            data = await (await resolve_client(args)).post("/reports", body)
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def delete_report(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         report_id = args.get("id")
         if not report_id:
             return json.dumps({"error": "Missing required argument: id"})
         try:
-            data = await get_client().delete(f"/reports/{quote(report_id, safe='')}")
+            data = await (await resolve_client(args)).delete(f"/reports/{quote(report_id, safe='')}")
             return json.dumps(data if data else {"status": "deleted"}, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def create_report_schedule(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         for field in ("reportDefinitionId", "resourceIds", "recurrence"):
             if not args.get(field):
@@ -668,13 +667,13 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
         if args.get("emailConfig"):
             body["emailConfig"] = args["emailConfig"]
         try:
-            data = await get_client().post(f"/reportdefinitions/{def_id}/schedules", body)
+            data = await (await resolve_client(args)).post(f"/reportdefinitions/{def_id}/schedules", body)
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def update_report_schedule(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         for field in ("reportDefinitionId", "scheduleId", "resourceIds", "recurrence"):
             if not args.get(field):
@@ -688,13 +687,13 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
         if args.get("emailConfig"):
             body["emailConfig"] = args["emailConfig"]
         try:
-            data = await get_client().put(f"/reportdefinitions/{def_id}/schedules", body)
+            data = await (await resolve_client(args)).put(f"/reportdefinitions/{def_id}/schedules", body)
             return json.dumps(data if data else {"status": "ok"}, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def delete_report_schedule(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         for field in ("reportDefinitionId", "scheduleId"):
             if not args.get(field):
@@ -702,7 +701,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
         def_id = quote(args["reportDefinitionId"], safe="")
         sched_id = quote(args["scheduleId"], safe="")
         try:
-            data = await get_client().delete(f"/reportdefinitions/{def_id}/schedules/{sched_id}")
+            data = await (await resolve_client(args)).delete(f"/reportdefinitions/{def_id}/schedules/{sched_id}")
             return json.dumps(data if data else {"status": "deleted"}, indent=2)
         except Exception as e:
             return format_error(e)
@@ -710,7 +709,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
     # ── Resources ─────────────────────────────────────────────────────────────
 
     async def create_resource(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         for field in ("adapterKindKey", "resourceKindKey", "resourceIdentifiers"):
             if not args.get(field):
@@ -733,31 +732,31 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:  # noqa: C901
             path = f"/resources/adapterkinds/{adapter_kind}"
 
         try:
-            data = await get_client().post(path, body)
+            data = await (await resolve_client(args)).post(path, body)
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def update_resource(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         resource = args.get("resource")
         if not resource or not isinstance(resource, dict):
             return json.dumps({"error": "Missing required argument: resource (must be an object)"})
         try:
-            data = await get_client().put("/resources", resource)
+            data = await (await resolve_client(args)).put("/resources", resource)
             return json.dumps(data if data else {"status": "ok"}, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def delete_resources(args: dict) -> str:
-        if (g := write_guard()):
+        if (g := write_guard(args.get("instance"))):
             return g
         resource_ids = args.get("resourceIds")
         if not resource_ids:
             return json.dumps({"error": "Missing required argument: resourceIds"})
         try:
-            data = await get_client().post("/resources/bulk/delete", {"resourceIds": resource_ids})
+            data = await (await resolve_client(args)).post("/resources/bulk/delete", {"resourceIds": resource_ids})
             return json.dumps(data if data else {"status": "deleted"}, indent=2)
         except Exception as e:
             return format_error(e)

@@ -7,11 +7,11 @@ from urllib.parse import quote
 
 import mcp.types as types
 
-from ariaops_mcp.client import get_client
 from ariaops_mcp.tools._common import (
     PAGE_SIZE_DEFAULT,
     PAGE_SIZE_MAX,
     format_error,
+    resolve_client,
     truncate_list_response,
 )
 
@@ -133,9 +133,10 @@ def tool_definitions() -> list[types.Tool]:
 def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
     async def list_resources(args: dict) -> str:
         try:
+            client = await resolve_client(args)
             page = max(0, int(args.get("page", 0)))
             page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
-            data = await get_client().get(
+            data = await client.get(
                 "/resources",
                 resourceKind=args.get("resourceKind"),
                 adapterKind=args.get("adapterKind"),
@@ -152,13 +153,15 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("id"):
             return json.dumps({"error": "Missing required argument: id"})
         try:
-            data = await get_client().get(f"/resources/{quote(args['id'], safe='')}")
+            client = await resolve_client(args)
+            data = await client.get(f"/resources/{quote(args['id'], safe='')}")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def query_resources(args: dict) -> str:
         try:
+            client = await resolve_client(args)
             page = max(0, int(args.get("page", 0)))
             page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
             body: dict[str, Any] = {}
@@ -168,7 +171,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 body["resourceKind"] = [args["resourceKind"]]
             if args.get("name"):
                 body["name"] = [args["name"]]
-            data = await get_client().post(
+            data = await client.post(
                 "/resources/query",
                 body,
                 page=page,
@@ -183,7 +186,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("id"):
             return json.dumps({"error": "Missing required argument: id"})
         try:
-            data = await get_client().get(f"/resources/{quote(args['id'], safe='')}/properties")
+            client = await resolve_client(args)
+            data = await client.get(f"/resources/{quote(args['id'], safe='')}/properties")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
@@ -197,18 +201,20 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 {"error": f"Invalid relationshipType: {rel}. Must be one of {sorted(VALID_RELATIONSHIP_TYPES)}"}
             )
         try:
+            client = await resolve_client(args)
             rid = quote(args["id"], safe="")
             if rel == "ALL":
-                data = await get_client().get(f"/resources/{rid}/relationships")
+                data = await client.get(f"/resources/{rid}/relationships")
             else:
-                data = await get_client().get(f"/resources/{rid}/relationships/{rel}")
+                data = await client.get(f"/resources/{rid}/relationships/{rel}")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
 
     async def list_adapter_kinds(args: dict) -> str:
         try:
-            data = await get_client().get("/adapterkinds")
+            client = await resolve_client(args)
+            data = await client.get("/adapterkinds")
             data = truncate_list_response(data, "adapter-kind")
             return json.dumps(data, indent=2)
         except Exception as e:
@@ -218,7 +224,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("adapterKindKey"):
             return json.dumps({"error": "Missing required argument: adapterKindKey"})
         try:
-            data = await get_client().get(f"/adapterkinds/{quote(args['adapterKindKey'], safe='')}/resourcekinds")
+            client = await resolve_client(args)
+            data = await client.get(f"/adapterkinds/{quote(args['adapterKindKey'], safe='')}/resourcekinds")
             data = truncate_list_response(data, "resource-kind")
             return json.dumps(data, indent=2)
         except Exception as e:
@@ -226,9 +233,10 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
 
     async def list_resource_groups(args: dict) -> str:
         try:
+            client = await resolve_client(args)
             page = max(0, int(args.get("page", 0)))
             page_size = min(max(1, int(args.get("pageSize", PAGE_SIZE_DEFAULT))), PAGE_SIZE_MAX)
-            data = await get_client().get(
+            data = await client.get(
                 "/resources/groups",
                 page=page,
                 pageSize=page_size,
@@ -242,7 +250,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
         if not args.get("groupId"):
             return json.dumps({"error": "Missing required argument: groupId"})
         try:
-            data = await get_client().get(f"/resources/groups/{quote(args['groupId'], safe='')}/members")
+            client = await resolve_client(args)
+            data = await client.get(f"/resources/groups/{quote(args['groupId'], safe='')}/members")
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
