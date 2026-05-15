@@ -17,9 +17,8 @@ def _normalize_url_claim(value: object) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
-    if text.endswith("/") and text.count("/") == 2:
-        return text[:-1]
-    return text.rstrip("/") if text != "/" else text
+    normalized = text.rstrip("/")
+    return normalized or text
 
 
 def _extract_scopes(claims: dict[str, Any]) -> list[str]:
@@ -79,8 +78,8 @@ class JWTTokenVerifier(TokenVerifier):
             logger.warning("Rejected HTTP OAuth bearer token without client identity claim")
             return None
 
-        audience = claims.get("aud")
-        resource = audience[0] if isinstance(audience, list) and audience else audience
+        raw_audience = claims.get("aud")
+        resource = raw_audience[0] if isinstance(raw_audience, list) and raw_audience else raw_audience
 
         return AccessToken(
             token=token,
