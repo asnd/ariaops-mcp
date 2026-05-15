@@ -31,6 +31,7 @@ def reset_client():
     reset_registry()
     server_module._tool_defs = None
     server_module._tool_handlers = None
+    clear_settings_cache()
 
 
 @pytest.fixture

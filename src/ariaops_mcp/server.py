@@ -155,7 +155,12 @@ async def _handle_list_skills(_args: dict[str, Any], _cid: str) -> str:
 
 async def _handle_execute_skill(args: dict[str, Any], cid: str) -> str:
     name = args.get("name", "")
-    arguments = args.get("arguments") or {}
+    raw_arguments = args.get("arguments")
+    if raw_arguments is not None and not isinstance(raw_arguments, dict):
+        return _format_skill_error(
+            f"'arguments' must be an object, got {type(raw_arguments).__name__}", cid
+        )
+    arguments: dict[str, Any] = raw_arguments or {}
     registry = get_registry()
     skill = registry.get(name)
 
@@ -230,8 +235,10 @@ def create_server() -> Server:
         cid = new_correlation_id()
         start = time.monotonic()
 
-        # Skill meta-tool dispatch.
+        # Skill meta-tool dispatch — reject if skills not configured.
         if name in _SKILL_TOOL_HANDLERS:
+            if not _skills_configured():
+                raise ValueError(f"Unknown tool: {name}")
             handler = _SKILL_TOOL_HANDLERS[name]
             try:
                 result = await handler(arguments or {}, cid)

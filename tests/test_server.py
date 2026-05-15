@@ -351,3 +351,84 @@ async def test_read_resource_skill_not_found(mock_env, monkeypatch, tmp_path):
                 method="resources/read", params={"uri": "ariaops://skills/nonexistent"}
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_skill_tool_rejected_when_not_configured(mock_env):
+    """Calling a skill tool when skills_dir is not set should be treated as unknown tool."""
+    server = create_server()
+    result = await server.request_handlers[CallToolRequest](
+        CallToolRequest(
+            method="tools/call", params={"name": "list_skills", "arguments": {}}
+        )
+    )
+    assert result.root.isError is True
+    assert "Unknown tool" in result.root.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_list_resources_includes_skills(mock_env, monkeypatch, tmp_path):
+    """list_resources should include skill resources when skills are configured."""
+    skill_content = "---\nname: my-skill\ndescription: My skill\n---\n\nBody"
+    (tmp_path / "skill.md").write_text(skill_content)
+    monkeypatch.setenv(SKILL_DIR_VAR, str(tmp_path))
+
+    server = create_server()
+    result = await server.request_handlers[ListResourcesRequest](
+        ListResourcesRequest(method="resources/list", params=None)
+    )
+    uris = {str(r.uri) for r in result.root.resources}
+    assert "ariaops://skills/my-skill" in uris
+
+
+@pytest.mark.asyncio
+async def test_execute_skill_orchestration_success(mock_env, monkeypatch, tmp_path):
+    """execute_skill should run orchestration steps through the server."""
+    skill_content = (
+        "---\n"
+        "name: chain-alert\n"
+        "description: Chain alert to resource\n"
+        "tools:\n  - get_version\n"
+        "orchestration: true\n"
+        "steps:\n"
+        "  - tool: get_version\n"
+        "    args_template: {}\n"
+        "    output_key: version\n"
+        "---\n\nOrchestrate"
+    )
+    (tmp_path / "chain.md").write_text(skill_content)
+    monkeypatch.setenv(SKILL_DIR_VAR, str(tmp_path))
+
+    version_data = {"releaseName": "8.18.0", "buildNumber": "12345678"}
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(
+            return_value=httpx.Response(200, json=TOKEN_RESPONSE)
+        )
+        respx.get(f"{BASE}/versions/current").mock(
+            return_value=httpx.Response(200, json=version_data)
+        )
+
+        server = create_server()
+        result = await server.request_handlers[CallToolRequest](
+            CallToolRequest(
+                method="tools/call",
+                params={"name": "execute_skill", "arguments": {"name": "chain-alert"}},
+            )
+        )
+        data = json.loads(result.root.content[0].text)
+        assert data["status"] == "completed"
+        assert data["skill"] == "chain-alert"
+        assert len(data["steps"]) == 1
+        assert data["steps"][0]["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_execute_skill_rejects_non_dict_arguments(mock_env, monkeypatch, tmp_path):
+    """execute_skill should reject non-dict 'arguments' parameter."""
+    from ariaops_mcp.server import _handle_execute_skill
+
+    result = await _handle_execute_skill(
+        {"name": "test-skill", "arguments": "not-a-dict"}, "test-cid"
+    )
+    data = json.loads(result)
+    assert "must be an object" in data["error"]
