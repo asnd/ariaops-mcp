@@ -5,7 +5,7 @@ from contextvars import ContextVar, Token
 from functools import lru_cache
 from typing import Annotated, Any, Literal
 
-from pydantic import AnyHttpUrl, Field, field_validator, model_validator
+from pydantic import AnyHttpUrl, Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
 
 
@@ -65,7 +65,7 @@ class Settings(BaseSettings):
 
     @field_validator("http_oauth_required_scopes", "http_oauth_jwt_algorithms", mode="before")
     @classmethod
-    def normalize_string_list(cls, value: Any) -> list[str]:
+    def normalize_string_list(cls, value: Any, info: ValidationInfo) -> list[str]:
         if value is None:
             return []
         if isinstance(value, str):
@@ -75,7 +75,7 @@ class Settings(BaseSettings):
             if stripped.startswith("["):
                 parsed = json.loads(stripped)
                 if not isinstance(parsed, list):
-                    raise ValueError("Expected a JSON array")
+                    raise ValueError(f"Expected a JSON array for {info.field_name}")
                 return [str(item).strip() for item in parsed if str(item).strip()]
             return [item.strip() for item in stripped.split(",") if item.strip()]
         if isinstance(value, list):

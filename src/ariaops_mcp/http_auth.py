@@ -78,13 +78,10 @@ class JWTTokenVerifier(TokenVerifier):
             logger.warning("Rejected HTTP OAuth bearer token without client identity claim")
             return None
 
-        raw_audience = claims.get("aud")
-        resource = raw_audience[0] if isinstance(raw_audience, list) and raw_audience else raw_audience
-
         return AccessToken(
             token=token,
             client_id=str(client_id),
             scopes=_extract_scopes(claims),
             expires_at=claims.get("exp"),
-            resource=str(resource) if resource is not None else None,
+            resource=self._audience,
         )
