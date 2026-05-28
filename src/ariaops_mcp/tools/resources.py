@@ -171,6 +171,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             data = await get_client().post(
                 "/resources/query",
                 body,
+                idempotent=True,
                 page=page,
                 pageSize=page_size,
             )

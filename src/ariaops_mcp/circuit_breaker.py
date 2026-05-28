@@ -46,6 +46,7 @@ class CircuitBreaker:
         self._failure_count = 0
         self._success_count = 0
         self._opened_at: float = 0.0
+        self._half_open_in_flight = 0
 
     @property
     def state(self) -> CircuitState:
@@ -62,9 +63,15 @@ class CircuitBreaker:
             elapsed = time.monotonic() - self._opened_at
             retry_after = max(0.0, self._recovery_timeout - elapsed)
             raise CircuitOpenError(retry_after=retry_after)
+        if current == CircuitState.HALF_OPEN:
+            if self._half_open_in_flight >= 1:
+                raise CircuitOpenError(retry_after=0.0)
+            self._half_open_in_flight += 1
 
     def record_success(self) -> None:
         """Record a successful request."""
+        if self._half_open_in_flight > 0:
+            self._half_open_in_flight -= 1
         if self._state == CircuitState.HALF_OPEN:
             self._success_count += 1
             logger.debug(
@@ -80,6 +87,8 @@ class CircuitBreaker:
 
     def record_failure(self) -> None:
         """Record a failed request (5xx, timeout, network error)."""
+        if self._half_open_in_flight > 0:
+            self._half_open_in_flight -= 1
         if self._state == CircuitState.HALF_OPEN:
             # Probe failed — reopen immediately
             self._transition_to(CircuitState.OPEN)
@@ -103,6 +112,8 @@ class CircuitBreaker:
             self._success_count = 0
         elif new_state == CircuitState.HALF_OPEN:
             self._success_count = 0
+            self._half_open_in_flight = 0
         elif new_state == CircuitState.CLOSED:
             self._failure_count = 0
             self._success_count = 0
+            self._half_open_in_flight = 0

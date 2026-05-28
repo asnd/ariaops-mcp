@@ -3,6 +3,8 @@
 import time
 from unittest.mock import patch
 
+import pytest
+
 from ariaops_mcp.circuit_breaker import CircuitBreaker, CircuitOpenError, CircuitState
 
 
@@ -99,3 +101,19 @@ def test_check_passes_when_half_open():
     cb.record_failure()
     assert cb.state == CircuitState.HALF_OPEN
     cb.check()  # Should not raise — probes allowed
+
+
+def test_half_open_allows_only_one_probe_at_a_time():
+    cb = CircuitBreaker(failure_threshold=2, recovery_timeout=0, success_threshold=2)
+    cb.record_failure()
+    cb.record_failure()
+    assert cb.state == CircuitState.HALF_OPEN
+
+    cb.check()
+
+    with pytest.raises(CircuitOpenError) as exc_info:
+        cb.check()
+    assert exc_info.value.retry_after == 0
+
+    cb.record_success()
+    cb.check()  # Probe slot released after completion
