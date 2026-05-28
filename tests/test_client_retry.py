@@ -105,7 +105,7 @@ async def test_short_lived_token_is_reused_before_dynamic_refresh_window(mock_en
 @pytest.mark.asyncio
 async def test_non_idempotent_post_does_not_retry_on_transient_failure(mock_env, monkeypatch):
     async def fake_sleep(delay: float) -> None:
-        return None
+        pass
 
     monkeypatch.setattr("ariaops_mcp.client.asyncio.sleep", fake_sleep)
 
