@@ -182,7 +182,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 body["rollUpType"] = roll_up_type
             if interval_type:
                 body["intervalType"] = interval_type
-            data = await get_client().post("/resources/stats/query", body)
+            data = await get_client().post("/resources/stats/query", body, idempotent=True)
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
@@ -197,7 +197,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 "resourceId": [{"resourceId": rid} for rid in args["resourceIds"]],
                 "statKey": [{"key": k} for k in args["statKeys"]],
             }
-            data = await get_client().post("/resources/stats/latest/query", body)
+            data = await get_client().post("/resources/stats/latest/query", body, idempotent=True)
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)
@@ -233,7 +233,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             }
             if args.get("propertyKeys"):
                 body["propertyKey"] = [{"key": k} for k in args["propertyKeys"]]
-            data = await get_client().post("/resources/properties/latest/query", body)
+            data = await get_client().post("/resources/properties/latest/query", body, idempotent=True)
             return json.dumps(data, indent=2)
         except Exception as e:
             return format_error(e)

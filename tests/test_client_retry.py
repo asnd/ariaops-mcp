@@ -1,6 +1,7 @@
 """Tests for AriaOpsClient retry and token-refresh behavior."""
 
 import asyncio
+import time
 
 import httpx
 import pytest
@@ -77,4 +78,91 @@ async def test_token_acquired_once_during_parallel_calls(mock_env):
         )
 
         assert token_route.call_count == 1
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_short_lived_token_is_reused_before_dynamic_refresh_window(mock_env):
+    short_lived_token = {
+        "token": "short-lived-token",
+        "validity": int((time.time() + 240) * 1000),
+    }
+
+    with respx.mock:
+        token_route = respx.post(f"{BASE}/auth/token/acquire").mock(
+            return_value=httpx.Response(200, json=short_lived_token)
+        )
+        respx.get(f"{BASE}/versions/current").mock(return_value=httpx.Response(200, json={"ok": True}))
+
+        client = AriaOpsClient()
+        await client.get("/versions/current")
+        await client.get("/versions/current")
+
+        assert token_route.call_count == 1
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_non_idempotent_post_does_not_retry_on_transient_failure(mock_env, monkeypatch):
+    async def fake_sleep(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr("ariaops_mcp.client.asyncio.sleep", fake_sleep)
+
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        create_route = respx.post(f"{BASE}/alerts").mock(return_value=httpx.Response(503, json={"error": "down"}))
+
+        client = AriaOpsClient()
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.post("/alerts", {"name": "new-alert"})
+
+        assert create_route.call_count == 1
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_idempotent_post_can_retry_on_transient_failure(mock_env, monkeypatch):
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr("ariaops_mcp.client.asyncio.sleep", fake_sleep)
+
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        query_route = respx.post(f"{BASE}/resources/query").mock(
+            side_effect=[
+                httpx.Response(503, json={"error": "temporary"}),
+                httpx.Response(200, json={"resourceList": []}),
+            ]
+        )
+
+        client = AriaOpsClient()
+        result = await client.post("/resources/query", {}, idempotent=True)
+
+        assert result == {"resourceList": []}
+        assert query_route.call_count == 2
+        assert sleep_calls == [0.5]
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_retry_stops_when_deadline_budget_cannot_cover_backoff(mock_env, monkeypatch):
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        version_route = respx.get(f"{BASE}/versions/current").mock(
+            return_value=httpx.Response(503, json={"error": "temporary"})
+        )
+
+        client = AriaOpsClient()
+        await client._ensure_token()
+        remaining_budget = iter([0.6, 0.4])
+        monkeypatch.setattr(client, "_remaining_request_budget", lambda: next(remaining_budget, 0.4))
+
+        with pytest.raises(TimeoutError):
+            await client.get("/versions/current")
+
+        assert version_route.call_count == 1
         await client.close()

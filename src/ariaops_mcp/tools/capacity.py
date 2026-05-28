@@ -185,7 +185,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 "resourceId": [{"resourceId": rid} for rid in all_resource_ids],
                 "statKey": [{"key": k} for k in CAPACITY_STAT_KEYS],
             }
-            stats_data = await client.post("/resources/stats/latest/query", body)
+            stats_data = await client.post("/resources/stats/latest/query", body, idempotent=True)
 
             return json.dumps(
                 {
@@ -233,7 +233,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 "end": end_time,
             }
             
-            stats_data = await client.post("/resources/stats/history/query", body)
+            stats_data = await client.post("/resources/stats/history/query", body, idempotent=True)
             
             # Extract data points
             values = []
@@ -393,7 +393,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 "end": end_time,
             }
             
-            stats_data = await client.post("/resources/stats/history/query", body)
+            stats_data = await client.post("/resources/stats/history/query", body, idempotent=True)
             
             # Extract data points (similar to forecast function)
             values = []
