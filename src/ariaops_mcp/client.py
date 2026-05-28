@@ -17,10 +17,15 @@ logger = logging.getLogger(__name__)
 
 _TOKEN_REFRESH_BUFFER_SECS = 300  # refresh 5 min before expiry
 _MIN_TOKEN_REFRESH_BUFFER_SECS = 1.0
+_TOKEN_REFRESH_BUFFER_RATIO = 0.1
 _RETRYABLE_STATUS_CODES = {429, 502, 503, 504}
 _MAX_ATTEMPTS = 4
 _BASE_BACKOFF_SECS = 0.5
 _SAFE_RETRY_METHODS = {"GET", "HEAD", "OPTIONS"}
+_HTTP_CONNECT_TIMEOUT_SECS = 30.0
+_HTTP_READ_TIMEOUT_SECS = 60.0
+_HTTP_WRITE_TIMEOUT_SECS = 30.0
+_HTTP_POOL_TIMEOUT_SECS = 30.0
 
 
 class AriaOpsClient:
@@ -38,7 +43,12 @@ class AriaOpsClient:
             success_threshold=settings.cb_success_threshold,
         )
         self._request_deadline = settings.request_deadline
-        self._http_timeout = httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0)
+        self._http_timeout = httpx.Timeout(
+            connect=_HTTP_CONNECT_TIMEOUT_SECS,
+            read=_HTTP_READ_TIMEOUT_SECS,
+            write=_HTTP_WRITE_TIMEOUT_SECS,
+            pool=_HTTP_POOL_TIMEOUT_SECS,
+        )
 
     @property
     def circuit_breaker(self) -> CircuitBreaker:
@@ -66,7 +76,7 @@ class AriaOpsClient:
         token_ttl = max(0.0, expiry - now)
         refresh_buffer = min(
             _TOKEN_REFRESH_BUFFER_SECS,
-            max(_MIN_TOKEN_REFRESH_BUFFER_SECS, token_ttl * 0.1),
+            max(_MIN_TOKEN_REFRESH_BUFFER_SECS, token_ttl * _TOKEN_REFRESH_BUFFER_RATIO),
         )
         return max(now, expiry - refresh_buffer)
 

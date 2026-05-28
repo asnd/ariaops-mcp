@@ -7,7 +7,7 @@ import httpx
 import pytest
 import respx
 
-from ariaops_mcp.client import AriaOpsClient
+from ariaops_mcp.client import _BASE_BACKOFF_SECS, AriaOpsClient
 from tests.conftest import TOKEN_RESPONSE
 
 BASE = "https://vrops.test.local/suite-api/api"
@@ -37,7 +37,7 @@ async def test_get_retries_on_transient_error_then_succeeds(mock_env, monkeypatc
 
         assert result["releaseName"] == "8.18.0"
         assert version_route.call_count == 2
-        assert sleep_calls == [0.5]
+        assert sleep_calls == [_BASE_BACKOFF_SECS]
         await client.close()
 
 
@@ -145,7 +145,7 @@ async def test_idempotent_post_can_retry_on_transient_failure(mock_env, monkeypa
 
         assert result == {"resourceList": []}
         assert query_route.call_count == 2
-        assert sleep_calls == [0.5]
+        assert sleep_calls == [_BASE_BACKOFF_SECS]
         await client.close()
 
 
