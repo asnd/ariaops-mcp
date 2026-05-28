@@ -58,6 +58,11 @@ class AriaOpsClient:
 
     @staticmethod
     def _compute_token_refresh_at(expiry: float, now: float) -> float:
+        """Pick a refresh point shortly before expiry without invalidating short-lived tokens.
+
+        We refresh at 10% of the observed TTL, capped at the legacy 5-minute buffer and
+        floored at 1 second so very short-lived tokens are still reused briefly.
+        """
         ttl = max(0.0, expiry - now)
         refresh_buffer = min(
             _TOKEN_REFRESH_BUFFER_SECS,
@@ -77,6 +82,7 @@ class AriaOpsClient:
 
     @staticmethod
     def _ensure_backoff_budget(remaining_budget: float | None, backoff_secs: float) -> None:
+        """Abort retries when the remaining deadline budget cannot absorb the next backoff."""
         if remaining_budget is not None and remaining_budget <= backoff_secs:
             raise TimeoutError(
                 "Insufficient request deadline budget "
