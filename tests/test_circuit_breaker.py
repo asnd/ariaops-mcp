@@ -3,6 +3,8 @@
 import time
 from unittest.mock import patch
 
+import pytest
+
 from ariaops_mcp.circuit_breaker import CircuitBreaker, CircuitOpenError, CircuitState
 
 
@@ -111,7 +113,7 @@ def test_half_open_allows_only_one_probe_at_a_time():
 
     try:
         cb.check()
-        assert False, "Expected CircuitOpenError for excess half-open probe"
+        pytest.fail("Expected CircuitOpenError for excess half-open probe")
     except CircuitOpenError as e:
         assert e.retry_after == 0
 

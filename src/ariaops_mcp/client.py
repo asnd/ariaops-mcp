@@ -75,6 +75,14 @@ class AriaOpsClient:
             return None
         return max(0.0, deadline_at - time.monotonic())
 
+    @staticmethod
+    def _ensure_backoff_budget(remaining_budget: float | None, backoff_secs: float) -> None:
+        if remaining_budget is not None and remaining_budget <= backoff_secs:
+            raise TimeoutError(
+                "Insufficient request deadline budget "
+                f"(remaining: {remaining_budget:.3f}s, required: {backoff_secs:.3f}s) for retry backoff"
+            )
+
     async def _ensure_token(self) -> None:
         now = time.time()
         if self._token and now < self._token_refresh_at:
@@ -128,7 +136,10 @@ class AriaOpsClient:
                 remaining_budget = self._remaining_request_budget()
                 if remaining_budget is not None:
                     if remaining_budget <= 0:
-                        raise TimeoutError("Request deadline budget exhausted before sending request")
+                        raise TimeoutError(
+                            "Request deadline budget exhausted "
+                            f"(remaining: {remaining_budget:.3f}s) before sending request"
+                        )
                     async with asyncio.timeout(remaining_budget):
                         resp = await http.request(method, path, **kwargs)
                 else:
@@ -151,8 +162,7 @@ class AriaOpsClient:
                     _MAX_ATTEMPTS,
                 )
                 remaining_budget = self._remaining_request_budget()
-                if remaining_budget is not None and remaining_budget <= backoff_secs:
-                    raise TimeoutError("Insufficient request deadline budget remaining for retry backoff")
+                self._ensure_backoff_budget(remaining_budget, backoff_secs)
                 await asyncio.sleep(backoff_secs)
                 attempt += 1
             except httpx.HTTPStatusError as exc:
@@ -172,8 +182,7 @@ class AriaOpsClient:
                         _MAX_ATTEMPTS,
                     )
                     remaining_budget = self._remaining_request_budget()
-                    if remaining_budget is not None and remaining_budget <= backoff_secs:
-                        raise TimeoutError("Insufficient request deadline budget remaining for retry backoff")
+                    self._ensure_backoff_budget(remaining_budget, backoff_secs)
                     await asyncio.sleep(backoff_secs)
                     attempt += 1
                     continue
@@ -192,8 +201,7 @@ class AriaOpsClient:
                         _MAX_ATTEMPTS,
                     )
                     remaining_budget = self._remaining_request_budget()
-                    if remaining_budget is not None and remaining_budget <= backoff_secs:
-                        raise TimeoutError("Insufficient request deadline budget remaining for retry backoff")
+                    self._ensure_backoff_budget(remaining_budget, backoff_secs)
                     await asyncio.sleep(backoff_secs)
                     attempt += 1
                     continue
