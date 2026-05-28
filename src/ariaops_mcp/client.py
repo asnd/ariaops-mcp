@@ -63,10 +63,10 @@ class AriaOpsClient:
         We refresh at 10% of the observed TTL, capped at the legacy 5-minute buffer and
         floored at 1 second so very short-lived tokens are still reused briefly.
         """
-        ttl = max(0.0, expiry - now)
+        token_ttl = max(0.0, expiry - now)
         refresh_buffer = min(
             _TOKEN_REFRESH_BUFFER_SECS,
-            max(_MIN_TOKEN_REFRESH_BUFFER_SECS, ttl * 0.1),
+            max(_MIN_TOKEN_REFRESH_BUFFER_SECS, token_ttl * 0.1),
         )
         return max(now, expiry - refresh_buffer)
 

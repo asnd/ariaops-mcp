@@ -11,6 +11,7 @@ from ariaops_mcp.client import AriaOpsClient
 from tests.conftest import TOKEN_RESPONSE
 
 BASE = "https://vrops.test.local/suite-api/api"
+SHORT_LIVED_TOKEN_TTL_SECS = 240
 
 
 @pytest.mark.asyncio
@@ -85,7 +86,7 @@ async def test_token_acquired_once_during_parallel_calls(mock_env):
 async def test_short_lived_token_is_reused_before_dynamic_refresh_window(mock_env):
     short_lived_token = {
         "token": "short-lived-token",
-        "validity": int((time.time() + 240) * 1000),
+        "validity": int((time.time() + SHORT_LIVED_TOKEN_TTL_SECS) * 1000),
     }
 
     with respx.mock:

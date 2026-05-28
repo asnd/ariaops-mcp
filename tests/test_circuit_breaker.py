@@ -111,11 +111,9 @@ def test_half_open_allows_only_one_probe_at_a_time():
 
     cb.check()
 
-    try:
+    with pytest.raises(CircuitOpenError) as exc_info:
         cb.check()
-        pytest.fail("Expected CircuitOpenError for excess half-open probe")
-    except CircuitOpenError as e:
-        assert e.retry_after == 0
+    assert exc_info.value.retry_after == 0
 
     cb.record_success()
     cb.check()  # Probe slot released after completion
