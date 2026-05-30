@@ -12,7 +12,7 @@ import httpx
 import mcp.types as types
 
 from ariaops_mcp.client import get_client
-from ariaops_mcp.tools._common import format_error
+from ariaops_mcp.tools._common import PAGE_SIZE_MAX, format_error
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             # Iterate all pages to collect every resource of this kind
             all_resource_ids: list[str] = []
             page = 0
-            page_size = 50
+            page_size = PAGE_SIZE_MAX
             while True:
                 resources_data = await client.get(
                     "/resources",
