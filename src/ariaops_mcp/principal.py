@@ -105,9 +105,15 @@ def resolve_principal(
         country = settings.default_country
         explicit_instance = settings.default_instance
     else:
-        role = _resolve_role(claims.get(settings.role_claim), settings)
-        if role is None:
+        raw_role = claims.get(settings.role_claim)
+        if raw_role is None:
+            # No role claim present — fall back to the configured default role.
             role = _resolve_role(settings.default_role, settings) or settings.default_role.lower()
+        else:
+            # A role was asserted: map it strictly so an unrecognized role is
+            # denied rather than silently inheriting the (often broader) default.
+            mapped = _resolve_role(raw_role, settings)
+            role = mapped if mapped is not None else str(raw_role)
         country = claims.get(settings.country_claim) or settings.default_country
         explicit_instance = claims.get(settings.instance_claim)
 

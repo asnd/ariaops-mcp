@@ -149,6 +149,53 @@ podman build --format docker -t ariaops-mcp .
 podman run --env-file .env -p 8080:8080 ariaops-mcp
 ```
 
+## Multiple Aria Operations instances
+
+A single MCP server can front several Aria Operations instances. Define them
+with `ARIAOPS_INSTANCES` (a JSON array); when set, the legacy single-host
+variables (`ARIAOPS_HOST`/`ARIAOPS_USERNAME`/`ARIAOPS_PASSWORD`) are optional.
+
+```env
+ARIAOPS_INSTANCES=[
+  {"id":"us","host":"us.vrops.example.com","username":"svc","password":"secret","country":"US"},
+  {"id":"de","host":"de.vrops.example.com","username":"svc","password":"secret","country":"DE"}
+]
+```
+
+Each entry needs a unique `id`. Optional per-instance fields: `auth_source`
+(default `local`), `verify_ssl` (default `true`), and `country` (used to pin
+country-role users).
+
+### Role-based access
+
+Access is scoped by the caller's **role**:
+
+| Role | Access |
+|------|--------|
+| `ops` | All configured instances. The target instance is chosen per call via the tool's `instance` argument (required only when more than one instance exists). |
+| `country` | Exactly one instance — the one matching the user's country (or explicit instance) claim. Requests for any other instance are rejected. |
+
+On the **HTTP transport** the role/country/instance are read from the validated
+JWT claims (claim names are configurable). On **stdio** (local) they fall back to
+the `ARIAOPS_DEFAULT_*` settings.
+
+Every instance-bound tool accepts an optional `instance` argument, and the
+`list_instances` tool returns the instances the current caller may use. Backward
+compatibility is preserved: with only the legacy single-host variables set, a
+single `default` instance is synthesized and existing behavior is unchanged.
+
+| Variable | Default | Description |
+|---|---|---|
+| `ARIAOPS_INSTANCES` | — | JSON array of instance objects (`id`, `host`, `username`, `password`, optional `auth_source`/`verify_ssl`/`country`) |
+| `ARIAOPS_ROLE_CLAIM` | `ariaops_role` | JWT claim holding the caller's role |
+| `ARIAOPS_COUNTRY_CLAIM` | `ariaops_country` | JWT claim holding the country code for country-role users |
+| `ARIAOPS_INSTANCE_CLAIM` | `ariaops_instance` | JWT claim holding an explicit instance id for country-role users |
+| `ARIAOPS_OPS_ROLE` | `ops` | Role value that grants access to all instances |
+| `ARIAOPS_COUNTRY_ROLE` | `country` | Role value that pins a user to a single instance |
+| `ARIAOPS_DEFAULT_ROLE` | `ops` | Role assumed when no JWT role claim is present (e.g. stdio) |
+| `ARIAOPS_DEFAULT_COUNTRY` | — | Country assumed for a country-role caller without a claim |
+| `ARIAOPS_DEFAULT_INSTANCE` | — | Default instance id for `ops` callers and the synthesized single instance |
+
 ## MCP Architecture
 
 ```text
@@ -217,6 +264,7 @@ Add to your MCP config (e.g. `~/.claude/mcp_settings.json` for AI code assistant
 | Capacity   | `get_capacity_remaining`, `get_capacity_overview`, `list_policies`, `get_capacity_forecast`, `get_trend_analysis` |
 | Reports    | `list_report_definitions`, `get_report_definition`, `list_reports`, `get_report`, `download_report`, `list_report_schedules` |
 | Discovery  | `get_version`, `list_collectors`, `list_symptoms`, `list_recommendations`, `list_supermetrics` |
+| Instances  | `list_instances` (always available; lists the Aria Ops instances accessible to the caller) |
 
 ### Write Tools (requires `ARIAOPS_ENABLE_WRITE_OPERATIONS=true`)
 
@@ -279,6 +327,15 @@ cd test-ui && pytest tests
 | `ARIAOPS_USERNAME` | Yes | — | API username |
 | `ARIAOPS_PASSWORD` | Yes | — | API password |
 | `ARIAOPS_AUTH_SOURCE` | No | `local` | Auth source (local / LDAP name) |
+| `ARIAOPS_INSTANCES` | No | — | JSON array of Aria Ops instances for multi-instance mode (see [Multiple Aria Operations instances](#multiple-aria-operations-instances)) |
+| `ARIAOPS_ROLE_CLAIM` | No | `ariaops_role` | JWT claim holding the caller's role (`ops` / `country`) |
+| `ARIAOPS_COUNTRY_CLAIM` | No | `ariaops_country` | JWT claim holding a country-role user's country code |
+| `ARIAOPS_INSTANCE_CLAIM` | No | `ariaops_instance` | JWT claim holding an explicit instance id for country-role users |
+| `ARIAOPS_OPS_ROLE` | No | `ops` | Role value granting access to all instances |
+| `ARIAOPS_COUNTRY_ROLE` | No | `country` | Role value pinning a user to a single instance |
+| `ARIAOPS_DEFAULT_ROLE` | No | `ops` | Role assumed when no JWT role claim is present |
+| `ARIAOPS_DEFAULT_COUNTRY` | No | — | Country assumed for a country-role caller without a claim |
+| `ARIAOPS_DEFAULT_INSTANCE` | No | — | Default instance id for `ops` callers / synthesized single instance |
 | `ARIAOPS_VERIFY_SSL` | No | `true` | TLS certificate verification |
 | `ARIAOPS_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `ARIAOPS_PORT` | No | `8080` | HTTP listen port |
