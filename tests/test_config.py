@@ -168,7 +168,7 @@ def test_http_oauth_jwks_with_rs256_accepted(monkeypatch):
 
 def test_http_oauth_keycloak_provider_derives_jwks_and_rs256(monkeypatch):
     _base_oauth_env(monkeypatch)
-    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_PROVIDER", "Keycloak")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_PROVIDER", "keycloak")
     monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_ISSUER_URL", "https://kc.example.com/realms/myrealm")
     monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_AUDIENCE", "mcp-client")
 

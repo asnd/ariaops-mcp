@@ -114,9 +114,10 @@ class Settings(BaseSettings):
             raise ValueError(f"HTTP OAuth requires: {', '.join(missing)}")
 
         if self.http_oauth_provider == "keycloak":
-            if not self.http_oauth_jwt_key and "http_oauth_jwt_algorithms" not in self.model_fields_set:
+            use_provider_jwks = not self.http_oauth_jwt_key
+            if use_provider_jwks and "http_oauth_jwt_algorithms" not in self.model_fields_set:
                 self.http_oauth_jwt_algorithms = ["RS256"]
-            if not self.http_oauth_jwt_key and not self.http_oauth_jwks_url:
+            if use_provider_jwks and not self.http_oauth_jwks_url:
                 issuer_url = str(self.http_oauth_issuer_url).rstrip("/")
                 self.http_oauth_jwks_url = TypeAdapter(AnyHttpUrl).validate_python(
                     f"{issuer_url}/protocol/openid-connect/certs"
