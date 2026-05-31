@@ -5,16 +5,82 @@ from contextvars import ContextVar, Token
 from functools import lru_cache
 from typing import Annotated, Any, Literal
 
-from pydantic import AnyHttpUrl, Field, TypeAdapter, ValidationInfo, field_validator, model_validator
+from pydantic import AnyHttpUrl, BaseModel, Field, TypeAdapter, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
+
+# Identifier used for the implicit single instance synthesized from the legacy
+# ARIAOPS_HOST/USERNAME/PASSWORD variables when ARIAOPS_INSTANCES is not set.
+DEFAULT_INSTANCE_ID = "default"
+
+
+class InstanceConfig(BaseModel):
+    """Connection settings for one Aria Operations instance.
+
+    Multiple instances are configured via the ``ARIAOPS_INSTANCES`` JSON array;
+    a single instance is also synthesized from the legacy ``ARIAOPS_HOST`` /
+    ``ARIAOPS_USERNAME`` / ``ARIAOPS_PASSWORD`` variables for backward compat.
+    """
+
+    id: str
+    host: str
+    username: str
+    password: str
+    auth_source: str = "local"
+    verify_ssl: bool = True
+    # Optional country code used to map a "country" role user to this instance.
+    country: str | None = None
+
+    @field_validator("id", "host")
+    @classmethod
+    def _not_blank(cls, value: str, info: ValidationInfo) -> str:
+        if not value or not value.strip():
+            raise ValueError(f"Instance {info.field_name} must not be blank")
+        return value.strip()
+
+    @field_validator("host")
+    @classmethod
+    def _host_no_scheme(cls, value: str) -> str:
+        if "://" in value:
+            raise ValueError("Instance host should be hostname only (no scheme)")
+        return value
+
+    @field_validator("country")
+    @classmethod
+    def _normalize_country(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @property
+    def base_url(self) -> str:
+        return f"https://{self.host}/suite-api/api"
 
 
 class Settings(BaseSettings):
-    host: str = Field(..., alias="ARIAOPS_HOST")
-    username: str = Field(..., alias="ARIAOPS_USERNAME")
-    password: str = Field(..., alias="ARIAOPS_PASSWORD")
+    host: str | None = Field(None, alias="ARIAOPS_HOST")
+    username: str | None = Field(None, alias="ARIAOPS_USERNAME")
+    password: str | None = Field(None, alias="ARIAOPS_PASSWORD")
     auth_source: str = Field("local", alias="ARIAOPS_AUTH_SOURCE")
     verify_ssl: bool = Field(True, alias="ARIAOPS_VERIFY_SSL")
+
+    # Multi-instance configuration (JSON array). When unset, a single instance is
+    # synthesized from the legacy ARIAOPS_HOST/USERNAME/PASSWORD variables.
+    instances: Annotated[list[InstanceConfig], NoDecode] = Field(
+        default_factory=list,
+        alias="ARIAOPS_INSTANCES",
+    )
+
+    # Role-based access. The role/country/instance are read from JWT claims on the
+    # HTTP transport, or fall back to the *_default values for stdio/local use.
+    role_claim: str = Field("ariaops_role", alias="ARIAOPS_ROLE_CLAIM")
+    country_claim: str = Field("ariaops_country", alias="ARIAOPS_COUNTRY_CLAIM")
+    instance_claim: str = Field("ariaops_instance", alias="ARIAOPS_INSTANCE_CLAIM")
+    ops_role: str = Field("ops", alias="ARIAOPS_OPS_ROLE")
+    country_role: str = Field("country", alias="ARIAOPS_COUNTRY_ROLE")
+    default_role: str = Field("ops", alias="ARIAOPS_DEFAULT_ROLE")
+    default_country: str | None = Field(None, alias="ARIAOPS_DEFAULT_COUNTRY")
+    default_instance: str | None = Field(None, alias="ARIAOPS_DEFAULT_INSTANCE")
     transport: Literal["stdio", "http"] = Field("stdio", alias="ARIAOPS_TRANSPORT")
     port: int = Field(8080, alias="ARIAOPS_PORT")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field("INFO", alias="ARIAOPS_LOG_LEVEL")
@@ -51,6 +117,95 @@ class Settings(BaseSettings):
     skills_dir: str | None = Field(None, alias="ARIAOPS_SKILLS_DIR")
 
     model_config = {"populate_by_name": True}
+
+    @field_validator("instances", mode="before")
+    @classmethod
+    def parse_instances(cls, value: Any) -> Any:
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"ARIAOPS_INSTANCES must be a JSON array: {exc}") from exc
+            if not isinstance(parsed, list):
+                raise ValueError("ARIAOPS_INSTANCES must be a JSON array of instance objects")
+            return parsed
+        return value
+
+    @field_validator("host")
+    @classmethod
+    def host_must_not_include_scheme(cls, value: str | None) -> str | None:
+        if value and "://" in value:
+            raise ValueError("ARIAOPS_HOST should be hostname only (no scheme)")
+        return value
+
+    @model_validator(mode="after")
+    def validate_instances(self) -> "Settings":
+        if self.instances:
+            ids = [inst.id for inst in self.instances]
+            duplicates = sorted({i for i in ids if ids.count(i) > 1})
+            if duplicates:
+                raise ValueError(f"Duplicate instance id(s) in ARIAOPS_INSTANCES: {', '.join(duplicates)}")
+            if self.default_instance and self.default_instance not in ids:
+                raise ValueError(
+                    f"ARIAOPS_DEFAULT_INSTANCE='{self.default_instance}' is not one of the "
+                    f"configured instances: {', '.join(ids)}"
+                )
+        else:
+            # Legacy single-instance mode requires the classic credentials.
+            missing = [
+                name
+                for name, value in (
+                    ("ARIAOPS_HOST", self.host),
+                    ("ARIAOPS_USERNAME", self.username),
+                    ("ARIAOPS_PASSWORD", self.password),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    "Provide either ARIAOPS_INSTANCES (JSON array) or the legacy "
+                    f"single-instance variables. Missing: {', '.join(missing)}"
+                )
+        return self
+
+    def resolved_instances(self) -> list[InstanceConfig]:
+        """Return the configured instances, synthesizing a single one from legacy vars."""
+        if self.instances:
+            return list(self.instances)
+        # host/username/password presence is guaranteed by validate_instances.
+        return [
+            InstanceConfig(
+                id=self.default_instance or DEFAULT_INSTANCE_ID,
+                host=self.host or "",
+                username=self.username or "",
+                password=self.password or "",
+                auth_source=self.auth_source,
+                verify_ssl=self.verify_ssl,
+                country=self.default_country,
+            )
+        ]
+
+    @property
+    def default_instance_id(self) -> str:
+        """The instance id used when no explicit instance is requested."""
+        instances = self.resolved_instances()
+        if self.default_instance:
+            return self.default_instance
+        return instances[0].id
+
+    def get_instance(self, instance_id: str | None = None) -> InstanceConfig:
+        """Look up an instance by id, defaulting to ``default_instance_id``."""
+        instances = self.resolved_instances()
+        target = instance_id or self.default_instance_id
+        for inst in instances:
+            if inst.id == target:
+                return inst
+        raise KeyError(f"Unknown Aria Operations instance: {target}")
 
     @field_validator("transport", mode="before")
     @classmethod
@@ -90,13 +245,6 @@ class Settings(BaseSettings):
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
         raise ValueError("Expected a comma-separated string or list")
-
-    @field_validator("host")
-    @classmethod
-    def host_must_not_include_scheme(cls, value: str) -> str:
-        if "://" in value:
-            raise ValueError("ARIAOPS_HOST should be hostname only (no scheme)")
-        return value
 
     @model_validator(mode="after")
     def validate_http_oauth(self) -> "Settings":
@@ -168,7 +316,8 @@ class Settings(BaseSettings):
 
     @property
     def base_url(self) -> str:
-        return f"https://{self.host}/suite-api/api"
+        """Base URL of the default instance (kept for backward compatibility)."""
+        return self.get_instance().base_url
 
 
 _settings_override: ContextVar[Settings | None] = ContextVar("ariaops_settings_override", default=None)
@@ -205,5 +354,11 @@ def clear_settings_cache() -> None:
         _svr._tool_handlers = None
         _svr._TOOL_DEFS = None
         _svr._TOOL_HANDLERS = None
+    except Exception:
+        pass
+    # Drop any cached per-instance clients so they are rebuilt from fresh settings.
+    try:
+        import ariaops_mcp.client as _client
+        _client.reset_client_cache()
     except Exception:
         pass

@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 
 from ariaops_mcp.circuit_breaker import CircuitBreaker
-from ariaops_mcp.config import get_settings
+from ariaops_mcp.config import InstanceConfig, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +29,9 @@ _HTTP_POOL_TIMEOUT_SECS = 30.0
 
 
 class AriaOpsClient:
-    def __init__(self) -> None:
+    def __init__(self, instance: InstanceConfig | None = None) -> None:
         settings = get_settings()
+        self._instance = instance or settings.get_instance()
         self._token: str | None = None
         self._token_expiry: float = 0.0
         self._token_refresh_at: float = 0.0
@@ -51,16 +52,20 @@ class AriaOpsClient:
         )
 
     @property
+    def instance(self) -> InstanceConfig:
+        """The Aria Operations instance this client is bound to."""
+        return self._instance
+
+    @property
     def circuit_breaker(self) -> CircuitBreaker:
         """Expose circuit breaker for testing and observability."""
         return self._circuit_breaker
 
     async def _get_http(self) -> httpx.AsyncClient:
         if self._http is None:
-            settings = get_settings()
             self._http = httpx.AsyncClient(
-                base_url=settings.base_url,
-                verify=settings.verify_ssl,
+                base_url=self._instance.base_url,
+                verify=self._instance.verify_ssl,
                 timeout=self._http_timeout,
                 headers={"Content-Type": "application/json", "Accept": "application/json"},
             )
@@ -115,9 +120,9 @@ class AriaOpsClient:
                 "/auth/token/acquire",
                 idempotent=True,
                 json={
-                    "username": get_settings().username,
-                    "password": get_settings().password,
-                    "authSource": get_settings().auth_source,
+                    "username": self._instance.username,
+                    "password": self._instance.password,
+                    "authSource": self._instance.auth_source,
                 },
             )
             data = resp.json()
@@ -347,20 +352,47 @@ class AriaOpsClient:
             self._http = None
 
 
-# Module-level singleton
-_client: AriaOpsClient | None = None
+# --- Per-instance client registry ------------------------------------------
+_clients: dict[str, AriaOpsClient] = {}
 _client_override: ContextVar[AriaOpsClient | None] = ContextVar("ariaops_client_override", default=None)
+_current_instance: ContextVar[str | None] = ContextVar("ariaops_current_instance", default=None)
 _request_deadline_at: ContextVar[float | None] = ContextVar("ariaops_request_deadline_at", default=None)
 
 
-def get_client() -> AriaOpsClient:
+def _resolve_instance_id(instance_id: str | None) -> str:
+    """Resolve the effective instance id: explicit arg → contextvar → settings default."""
+    if instance_id is not None:
+        return instance_id
+    current = _current_instance.get()
+    if current is not None:
+        return current
+    return get_settings().default_instance_id
+
+
+def get_client(instance_id: str | None = None) -> AriaOpsClient:
+    """Return the client for the requested (or current/default) instance.
+
+    A test override, when set, takes precedence regardless of instance so the
+    existing single-client test harness keeps working.
+    """
     override = _client_override.get()
     if override is not None:
         return override
-    global _client
-    if _client is None:
-        _client = AriaOpsClient()
-    return _client
+    target = _resolve_instance_id(instance_id)
+    client = _clients.get(target)
+    if client is None:
+        instance = get_settings().get_instance(target)
+        client = AriaOpsClient(instance)
+        _clients[target] = client
+    return client
+
+
+def set_current_instance(instance_id: str) -> Token[str | None]:
+    return _current_instance.set(instance_id)
+
+
+def reset_current_instance(token: Token[str | None]) -> None:
+    _current_instance.reset(token)
 
 
 def set_client_override(client: AriaOpsClient) -> Token[AriaOpsClient | None]:
@@ -369,3 +401,23 @@ def set_client_override(client: AriaOpsClient) -> Token[AriaOpsClient | None]:
 
 def reset_client_override(token: Token[AriaOpsClient | None]) -> None:
     _client_override.reset(token)
+
+
+def reset_client_cache() -> None:
+    """Drop all cached per-instance clients (without closing them).
+
+    Used by ``clear_settings_cache`` and tests. Callers that need graceful
+    token release should use :func:`close_all` instead.
+    """
+    _clients.clear()
+
+
+async def close_all() -> None:
+    """Close every cached client, releasing tokens and HTTP connections."""
+    clients = list(_clients.values())
+    _clients.clear()
+    for client in clients:
+        try:
+            await client.close()
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("Failed to close client for instance %s: %s", client.instance.id, e)

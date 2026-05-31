@@ -1,5 +1,6 @@
 """MCP server setup and tool registration."""
 
+import copy
 import json
 import logging
 import time
@@ -12,8 +13,10 @@ from mcp.server import Server
 from pydantic import AnyUrl
 
 from ariaops_mcp.circuit_breaker import CircuitOpenError
+from ariaops_mcp.client import reset_current_instance, set_current_instance
 from ariaops_mcp.config import get_settings
 from ariaops_mcp.logging_config import new_correlation_id
+from ariaops_mcp.principal import AccessDenied, Principal, resolve_principal
 from ariaops_mcp.skills.executor import execute_skill as _run_skill_orchestration
 from ariaops_mcp.skills.prompts import render_prompt, skill_to_prompt
 from ariaops_mcp.skills.registry import get_registry
@@ -25,6 +28,31 @@ READ_ONLY_MODULES = [resources, alerts, metrics, capacity, reports, discovery]
 
 # Write-operation tool names (always known, independent of whether they're enabled).
 _WRITE_TOOL_NAMES: set[str] = {t.name for t in write_ops.tool_definitions()}
+
+# Meta-tools that operate on the server itself and are not bound to a single
+# Aria Operations instance.
+_INSTANCE_AGNOSTIC_TOOLS: set[str] = {"list_skills", "reload_skills", "list_instances"}
+
+_INSTANCE_ARG_SCHEMA: dict[str, Any] = {
+    "type": "string",
+    "description": (
+        "Target Aria Operations instance id. Required for the 'ops' role when "
+        "multiple instances are configured; for the 'country' role the instance "
+        "is fixed and this argument is ignored. Use 'list_instances' to discover "
+        "accessible instances."
+    ),
+}
+
+
+def _with_instance_arg(tool: types.Tool) -> types.Tool:
+    """Return a copy of ``tool`` whose input schema advertises the ``instance`` arg."""
+    if not isinstance(tool.inputSchema, dict):
+        return tool
+    schema = copy.deepcopy(tool.inputSchema)
+    properties = schema.setdefault("properties", {})
+    if isinstance(properties, dict):
+        properties.setdefault("instance", _INSTANCE_ARG_SCHEMA)
+    return tool.model_copy(update={"inputSchema": schema})
 
 
 def _write_operations_enabled() -> bool:
@@ -207,6 +235,61 @@ _SKILL_TOOL_HANDLERS: dict[str, Callable[..., Awaitable[str]]] = {
 }
 
 
+def _instance_tool_defs() -> list[types.Tool]:
+    return [
+        types.Tool(
+            name="list_instances",
+            description="List the Aria Operations instances accessible to the current user/role.",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+    ]
+
+
+def _current_claims() -> dict[str, Any] | None:
+    """Return the validated JWT claims for the current request, if any."""
+    try:
+        from mcp.server.auth.middleware.auth_context import get_access_token
+
+        token = get_access_token()
+    except Exception:
+        return None
+    if token is None:
+        return None
+    return token.claims
+
+
+def _resolve_principal_for_request() -> Principal:
+    return resolve_principal(claims=_current_claims())
+
+
+async def _handle_list_instances(_args: dict[str, Any], cid: str) -> str:
+    try:
+        principal = _resolve_principal_for_request()
+    except AccessDenied as e:
+        return json.dumps({"error": "Access denied", "detail": str(e), "correlation_id": cid})
+    settings = get_settings()
+    accessible = [
+        {"id": inst.id, "host": inst.host, "country": inst.country}
+        for inst in settings.resolved_instances()
+        if principal.can_access(inst.id)
+    ]
+    return json.dumps(
+        {
+            "role": principal.role,
+            "default_instance": principal.default_instance_id,
+            "instances": accessible,
+            "correlation_id": cid,
+        },
+        indent=2,
+    )
+
+
+_META_TOOL_HANDLERS: dict[str, Callable[..., Awaitable[str]]] = {
+    **_SKILL_TOOL_HANDLERS,
+    "list_instances": _handle_list_instances,
+}
+
+
 def _skills_configured() -> bool:
     """Check if skills directory is configured (regardless of whether skills loaded)."""
     try:
@@ -224,40 +307,46 @@ def create_server() -> Server:
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
         tool_defs, _ = _get_tool_registry()
-        tools = list(tool_defs)
-        # Always expose skill meta-tools when skills_dir is configured.
+        # Advertise the optional per-request `instance` argument on every
+        # instance-bound tool so MCP clients can target a specific instance.
+        tools = [_with_instance_arg(t) for t in tool_defs]
+        # `list_instances` is always available for instance discovery.
+        tools.extend(_instance_tool_defs())
+        # Skill meta-tools are exposed only when a skills directory is configured.
         if _skills_configured():
-            tools.extend(_skill_tool_defs())
+            skill_defs = _skill_tool_defs()
+            tools.extend(
+                _with_instance_arg(t) if t.name == "execute_skill" else t for t in skill_defs
+            )
         return tools
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict | None) -> list[types.TextContent]:
         cid = new_correlation_id()
         start = time.monotonic()
+        args: dict[str, Any] = dict(arguments or {})
 
-        # Skill meta-tool dispatch — reject if skills not configured.
-        if name in _SKILL_TOOL_HANDLERS:
-            if not _skills_configured():
-                raise ValueError(f"Unknown tool: {name}")
-            handler = _SKILL_TOOL_HANDLERS[name]
+        async def _run(coro: Awaitable[str]) -> str:
             try:
-                result = await handler(arguments or {}, cid)
+                return await coro
             except CircuitOpenError as e:
-                result = json.dumps({
+                return json.dumps({
                     "error": "Service unavailable",
                     "detail": str(e),
                     "retry_after": e.retry_after,
                     "correlation_id": cid,
                 })
             except TimeoutError:
-                result = json.dumps({
+                return json.dumps({
                     "error": "Request deadline exceeded",
                     "detail": f"Total time exceeded {get_settings().request_deadline}s including retries",
                     "correlation_id": cid,
                 })
             except Exception as e:
-                logger.exception("Skill tool '%s' failed unexpectedly", name)
-                result = _format_skill_error(f"Unexpected error: {e}", cid)
+                logger.exception("Tool '%s' failed unexpectedly", name)
+                return json.dumps({"error": "Unexpected error", "detail": str(e), "correlation_id": cid})
+
+        def _log_done() -> None:
             duration_ms = (time.monotonic() - start) * 1000
             logger.info(
                 "tool_call: %s [%s] %.0fms",
@@ -266,41 +355,48 @@ def create_server() -> Server:
                 duration_ms,
                 extra={"event": "tool_call", "tool": name, "duration_ms": duration_ms},
             )
-            return [types.TextContent(type="text", text=result)]
 
-        # Standard tool dispatch.
-        _, tool_handlers = _get_tool_registry()
-        handler = tool_handlers.get(name)
-        if not handler:
+        # Resolve which handler serves this tool.
+        is_skill_tool = name in _SKILL_TOOL_HANDLERS
+        if is_skill_tool and not _skills_configured():
             raise ValueError(f"Unknown tool: {name}")
 
-        try:
-            result = await handler(arguments or {})
-        except CircuitOpenError as e:
-            result = json.dumps({
-                "error": "Service unavailable",
-                "detail": str(e),
-                "retry_after": e.retry_after,
-                "correlation_id": cid,
-            })
-        except TimeoutError:
-            result = json.dumps({
-                "error": "Request deadline exceeded",
-                "detail": f"Total time exceeded {get_settings().request_deadline}s including retries",
-                "correlation_id": cid,
-            })
-        except Exception as e:
-            logger.exception("Tool '%s' failed unexpectedly", name)
-            result = json.dumps({"error": "Unexpected error", "detail": str(e), "correlation_id": cid})
+        meta_handler = _META_TOOL_HANDLERS.get(name)
+        if meta_handler is not None and name in _INSTANCE_AGNOSTIC_TOOLS:
+            # Server meta-tools that are not bound to a specific instance.
+            result = await _run(meta_handler(args, cid))
+            _log_done()
+            return [types.TextContent(type="text", text=result)]
 
-        duration_ms = (time.monotonic() - start) * 1000
-        logger.info(
-            "tool_call: %s [%s] %.0fms",
-            name,
-            cid,
-            duration_ms,
-            extra={"event": "tool_call", "tool": name, "duration_ms": duration_ms},
-        )
+        # Everything below is instance-bound: resolve the caller's principal,
+        # enforce access to the requested instance, and pin the client context.
+        requested_instance = args.pop("instance", None)
+        if requested_instance is not None:
+            requested_instance = str(requested_instance)
+        try:
+            principal = _resolve_principal_for_request()
+            instance_id = principal.resolve_instance(requested_instance)
+        except AccessDenied as e:
+            result = json.dumps({"error": "Access denied", "detail": str(e), "correlation_id": cid})
+            _log_done()
+            return [types.TextContent(type="text", text=result)]
+
+        if meta_handler is not None:
+            handler_coro = meta_handler(args, cid)
+        else:
+            _, tool_handlers = _get_tool_registry()
+            std_handler = tool_handlers.get(name)
+            if not std_handler:
+                raise ValueError(f"Unknown tool: {name}")
+            handler_coro = std_handler(args)
+
+        instance_token = set_current_instance(instance_id)
+        try:
+            result = await _run(handler_coro)
+        finally:
+            reset_current_instance(instance_token)
+
+        _log_done()
         return [types.TextContent(type="text", text=result)]
 
     @server.list_resources()
