@@ -5,7 +5,7 @@ from contextvars import ContextVar, Token
 from functools import lru_cache
 from typing import Annotated, Any, Literal
 
-from pydantic import AnyHttpUrl, Field, ValidationInfo, field_validator, model_validator
+from pydantic import AnyHttpUrl, Field, TypeAdapter, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
 
 
@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     log_format: Literal["text", "json"] = Field("text", alias="ARIAOPS_LOG_FORMAT")
     enable_write_operations: bool = Field(False, alias="ARIAOPS_ENABLE_WRITE_OPERATIONS")
     http_oauth_enabled: bool = Field(False, alias="ARIAOPS_HTTP_OAUTH_ENABLED")
+    http_oauth_provider: Literal["generic", "keycloak"] = Field("generic", alias="ARIAOPS_HTTP_OAUTH_PROVIDER")
     http_oauth_issuer_url: AnyHttpUrl | None = Field(None, alias="ARIAOPS_HTTP_OAUTH_ISSUER_URL")
     http_oauth_resource_server_url: AnyHttpUrl | None = Field(None, alias="ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL")
     http_oauth_required_scopes: Annotated[list[str], NoDecode] = Field(
@@ -66,6 +67,11 @@ class Settings(BaseSettings):
     def normalize_log_format(cls, value: str) -> str:
         return value.lower()
 
+    @field_validator("http_oauth_provider", mode="before")
+    @classmethod
+    def normalize_http_oauth_provider(cls, value: str) -> str:
+        return value.lower()
+
     @field_validator("http_oauth_required_scopes", "http_oauth_jwt_algorithms", mode="before")
     @classmethod
     def normalize_string_list(cls, value: Any, info: ValidationInfo) -> list[str]:
@@ -106,6 +112,16 @@ class Settings(BaseSettings):
         missing = [name for name, value in required_fields.items() if not value]
         if missing:
             raise ValueError(f"HTTP OAuth requires: {', '.join(missing)}")
+
+        if self.http_oauth_provider == "keycloak":
+            use_provider_jwks = not self.http_oauth_jwt_key
+            if use_provider_jwks and "http_oauth_jwt_algorithms" not in self.model_fields_set:
+                self.http_oauth_jwt_algorithms = ["RS256"]
+            if use_provider_jwks and not self.http_oauth_jwks_url:
+                issuer_url = str(self.http_oauth_issuer_url).rstrip("/")
+                self.http_oauth_jwks_url = TypeAdapter(AnyHttpUrl).validate_python(
+                    f"{issuer_url}/protocol/openid-connect/certs"
+                )
 
         if not self.http_oauth_jwt_algorithms:
             raise ValueError("HTTP OAuth requires at least one JWT algorithm")
