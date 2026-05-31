@@ -80,10 +80,11 @@ python -m ariaops_mcp
 | Variable | Required | Default | Notes |
 |----------|----------|---------|-------|
 | `ARIAOPS_HTTP_OAUTH_ENABLED` | no | `false` | Turn enforcement on. Requires `ARIAOPS_TRANSPORT=http`. |
+| `ARIAOPS_HTTP_OAUTH_PROVIDER` | no | `generic` | Set to `keycloak` to derive the realm JWKS URL and default accepted algorithms to `RS256` when no key material is supplied. |
 | `ARIAOPS_HTTP_OAUTH_ISSUER_URL` | yes | — | Expected `iss` claim and the authorization server published via the discovery doc. |
 | `ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL` | yes | — | This server's resource identifier — used as the default `aud` and exposed via `/.well-known/oauth-protected-resource`. |
 | `ARIAOPS_HTTP_OAUTH_JWT_KEY` | one of | — | HS256/384/512 shared secret (≥32 bytes) **or** PEM public key for RS*/ES*/PS*. |
-| `ARIAOPS_HTTP_OAUTH_JWKS_URL` | one of | — | JWKS endpoint URL (e.g. Keycloak's `/realms/<realm>/protocol/openid-connect/certs`). Mutually exclusive with `JWT_KEY`; required for IdPs that rotate keys. |
+| `ARIAOPS_HTTP_OAUTH_JWKS_URL` | one of | — | JWKS endpoint URL (e.g. Keycloak's `/realms/<realm>/protocol/openid-connect/certs`). Mutually exclusive with `JWT_KEY`; required for IdPs that rotate keys. Optional when `ARIAOPS_HTTP_OAUTH_PROVIDER=keycloak`. |
 | `ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS` | no | `HS256` | Comma-separated list. The verifier rejects every algorithm not on this list (so `alg: none` and algorithm confusion are blocked). |
 | `ARIAOPS_HTTP_OAUTH_AUDIENCE` | no | resource URL | Override if your IdP issues a different `aud`. |
 | `ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES` | no | `[]` | Tokens must carry every listed scope or get a 403 `insufficient_scope`. |
@@ -114,10 +115,9 @@ Keycloak is a supported IdP. Use JWKS — Keycloak rotates RS256 keys.
    ```bash
    ARIAOPS_TRANSPORT=http \
    ARIAOPS_HTTP_OAUTH_ENABLED=true \
+   ARIAOPS_HTTP_OAUTH_PROVIDER=keycloak \
    ARIAOPS_HTTP_OAUTH_ISSUER_URL=https://kc.example.com/realms/myrealm \
    ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL=https://mcp.example.com \
-   ARIAOPS_HTTP_OAUTH_JWKS_URL=https://kc.example.com/realms/myrealm/protocol/openid-connect/certs \
-   ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS=RS256 \
    ARIAOPS_HTTP_OAUTH_AUDIENCE=mcp-client \
    ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES=mcp:read \
    python -m ariaops_mcp
@@ -138,6 +138,7 @@ Keycloak is a supported IdP. Use JWKS — Keycloak rotates RS256 keys.
 
 Notes:
 - `iss` in Keycloak tokens is exactly `https://<host>/realms/<realm>` (no trailing slash). The verifier strips trailing slashes on both sides, so either form works in config.
+- `ARIAOPS_HTTP_OAUTH_PROVIDER=keycloak` derives `ARIAOPS_HTTP_OAUTH_JWKS_URL` as `<issuer>/protocol/openid-connect/certs` and defaults `ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS` to `RS256` unless you explicitly set algorithms or `ARIAOPS_HTTP_OAUTH_JWT_KEY`.
 - Roles (`realm_access.roles`, `resource_access.<client>.roles`) are not enforced — only OAuth `scope`. Map roles to scopes in Keycloak if you need RBAC.
 - The verifier wraps `PyJWKClient` in `asyncio.to_thread`, so a JWKS cache miss does not block the event loop.
 
@@ -282,6 +283,7 @@ cd test-ui && pytest tests
 | `ARIAOPS_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `ARIAOPS_PORT` | No | `8080` | HTTP listen port |
 | `ARIAOPS_HTTP_OAUTH_ENABLED` | No | `false` | Require OAuth 2.x bearer tokens on the HTTP MCP transport |
+| `ARIAOPS_HTTP_OAUTH_PROVIDER` | No | `generic` | Use `keycloak` for Keycloak realm JWKS/RS256 defaults |
 | `ARIAOPS_HTTP_OAUTH_ISSUER_URL` | No | — | OAuth 2.x issuer URL advertised to MCP clients when HTTP auth is enabled |
 | `ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL` | No | — | Public MCP HTTP endpoint URL used for OAuth protected-resource metadata |
 | `ARIAOPS_HTTP_OAUTH_JWT_KEY` | One of | — | HS* shared secret (≥32 bytes) or PEM public key for RS*/ES*/PS* |

@@ -166,6 +166,27 @@ def test_http_oauth_jwks_with_rs256_accepted(monkeypatch):
     assert str(settings.http_oauth_jwks_url) == "https://issuer.example.com/jwks"
 
 
+def test_http_oauth_keycloak_provider_derives_jwks_and_rs256(monkeypatch):
+    _base_oauth_env(monkeypatch)
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_PROVIDER", "Keycloak")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_ISSUER_URL", "https://kc.example.com/realms/myrealm")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_AUDIENCE", "mcp-client")
+
+    settings = Settings()  # type: ignore[call-arg]
+    assert settings.http_oauth_provider == "keycloak"
+    assert str(settings.http_oauth_jwks_url) == "https://kc.example.com/realms/myrealm/protocol/openid-connect/certs"
+    assert settings.http_oauth_jwt_algorithms == ["RS256"]
+
+
+def test_http_oauth_keycloak_provider_preserves_explicit_algorithms(monkeypatch):
+    _base_oauth_env(monkeypatch)
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_PROVIDER", "keycloak")
+    monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS", "RS384,RS512")
+
+    settings = Settings()  # type: ignore[call-arg]
+    assert settings.http_oauth_jwt_algorithms == ["RS384", "RS512"]
+
+
 def test_http_oauth_negative_leeway_rejected(monkeypatch):
     _base_oauth_env(monkeypatch)
     monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_JWT_KEY", _HS256_SECRET)

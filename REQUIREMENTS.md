@@ -44,6 +44,8 @@ Response: { "token": "...", "validity": 1234567890, "expiresAt": "..." }
 | AUTH-5 | Release token on graceful shutdown via `POST /api/auth/token/release` |
 | AUTH-6 | Pass token as HTTP header: `Authorization: vRealizeOpsToken {token}` |
 | AUTH-7 | Support `ARIAOPS_VERIFY_SSL` env var (default: `true`); when `false`, skip TLS verification |
+| AUTH-8 | For HTTP transport, optionally require OAuth 2.x bearer tokens and validate JWT issuer, audience, expiry, signature, and scopes |
+| AUTH-9 | Support Keycloak as the reference OAuth IdP via realm issuer URLs, RS256 JWKS verification, and protected-resource metadata |
 
 ---
 
@@ -269,6 +271,14 @@ All via environment variables (12-factor):
 | `ARIAOPS_VERIFY_SSL`  | No       | `true`    | TLS verification                   |
 | `ARIAOPS_PORT`        | No       | `8080`    | HTTP transport listen port         |
 | `ARIAOPS_TRANSPORT`   | No       | `stdio`   | `stdio` or `http`                  |
+| `ARIAOPS_HTTP_OAUTH_ENABLED` | No | `false` | Require OAuth 2.x bearer tokens on HTTP transport |
+| `ARIAOPS_HTTP_OAUTH_PROVIDER` | No | `generic` | Use `keycloak` for Keycloak realm JWKS/RS256 defaults |
+| `ARIAOPS_HTTP_OAUTH_ISSUER_URL` | No | — | OAuth issuer / Keycloak realm URL |
+| `ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL` | No | — | Public MCP HTTP resource URL |
+| `ARIAOPS_HTTP_OAUTH_JWT_KEY` | One of | — | Static JWT secret or PEM key |
+| `ARIAOPS_HTTP_OAUTH_JWKS_URL` | One of | — | JWKS URL for IdP-managed signing keys |
+| `ARIAOPS_HTTP_OAUTH_AUDIENCE` | No | resource URL | Expected JWT audience |
+| `ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES` | No | — | Required OAuth scopes |
 | `ARIAOPS_LOG_LEVEL`   | No       | `INFO`    | Logging level                      |
 | `ARIAOPS_ENABLE_WRITE_OPERATIONS` | No | `false` | Enable write/mutating tools      |
 

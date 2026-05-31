@@ -475,6 +475,46 @@ async def test_verifier_jwks_path_keycloak_shape(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_verifier_keycloak_provider_defaults_verify_rs256_token(monkeypatch):
+    """Keycloak provider mode derives the realm JWKS URL and defaults to RS256."""
+    private_key, jwk = _generate_rsa_keypair()
+
+    settings = _build_settings(
+        ARIAOPS_HTTP_OAUTH_ENABLED=True,
+        ARIAOPS_HTTP_OAUTH_PROVIDER="keycloak",
+        ARIAOPS_HTTP_OAUTH_ISSUER_URL="https://kc.example.com/realms/myrealm",
+        ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL="https://mcp.example.com",
+        ARIAOPS_HTTP_OAUTH_AUDIENCE="mcp-client",
+    )
+    verifier = JWTTokenVerifier(settings)
+
+    from jwt import PyJWK, PyJWKClient
+
+    def fake_get_signing_key_from_jwt(_self, _token):
+        return PyJWK(jwk)
+
+    monkeypatch.setattr(PyJWKClient, "get_signing_key_from_jwt", fake_get_signing_key_from_jwt)
+
+    now = datetime.now(UTC)
+    token = _sign_rs256(
+        private_key,
+        {
+            "iss": "https://kc.example.com/realms/myrealm",
+            "aud": "mcp-client",
+            "azp": "mcp-client",
+            "scope": "mcp:read",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(minutes=5)).timestamp()),
+        },
+    )
+
+    access = await verifier.verify_token(token)
+    assert access is not None
+    assert settings.http_oauth_jwt_algorithms == ["RS256"]
+    assert str(settings.http_oauth_jwks_url) == "https://kc.example.com/realms/myrealm/protocol/openid-connect/certs"
+
+
+@pytest.mark.asyncio
 async def test_verifier_jwks_lookup_failure_rejects(monkeypatch):
     """If JWKS lookup raises, verify_token must return None (not propagate)."""
     settings = _build_settings(
