@@ -420,4 +420,5 @@ async def close_all() -> None:
         try:
             await client.close()
         except Exception as e:  # pragma: no cover - defensive
-            logger.warning("Failed to close client for instance %s: %s", client.instance.id, e)
+            instance_id = getattr(getattr(client, "instance", None), "id", "unknown")
+            logger.warning("Failed to close client for instance %s: %s", instance_id, e)
