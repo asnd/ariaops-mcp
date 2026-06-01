@@ -17,7 +17,8 @@ os.environ.setdefault("ARIAOPS_PASSWORD", "testpass")
 @pytest.fixture(autouse=True)
 def reset_client():
     """Reset the module-level client, registry, and settings cache before each test."""
-    client_module._client = None
+    client_module.reset_client_cache()
+    client_module._client_override.set(None)
     # Reset skill registry singleton to avoid cross-test pollution.
     from ariaops_mcp.skills.registry import reset_registry
     reset_registry()
@@ -27,7 +28,7 @@ def reset_client():
     server_module._tool_handlers = None
     clear_settings_cache()
     yield
-    client_module._client = None
+    client_module.reset_client_cache()
     reset_registry()
     server_module._tool_defs = None
     server_module._tool_handlers = None

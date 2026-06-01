@@ -112,4 +112,6 @@ class JWTTokenVerifier(TokenVerifier):
             scopes=_extract_scopes(claims),
             expires_at=claims.get("exp"),
             resource=self._audience,
+            subject=claims.get("sub"),
+            claims=claims,
         )

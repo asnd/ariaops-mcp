@@ -17,7 +17,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from ariaops_mcp.client import get_client
+from ariaops_mcp.client import close_all, get_client
 from ariaops_mcp.config import Settings, get_settings
 from ariaops_mcp.http_auth import JWTTokenVerifier
 from ariaops_mcp.logging_config import configure_logging
@@ -25,13 +25,29 @@ from ariaops_mcp.server import create_server
 
 
 async def _health_check(_request: Request) -> JSONResponse:
-    try:
-        client = get_client()
-        cb_state = client.circuit_breaker.state.value
-        await client.get("/versions/current")
-        return JSONResponse({"status": "ok", "circuit_breaker": cb_state})
-    except Exception as e:
-        return JSONResponse({"status": "degraded", "detail": str(e)}, status_code=503)
+    settings = get_settings()
+    instances = settings.resolved_instances()
+    results: list[dict[str, Any]] = []
+    overall_ok = True
+    for inst in instances:
+        client = get_client(inst.id)
+        entry: dict[str, Any] = {"id": inst.id, "circuit_breaker": client.circuit_breaker.state.value}
+        try:
+            await client.get("/versions/current")
+            entry["status"] = "ok"
+        except Exception as e:
+            entry["status"] = "degraded"
+            entry["detail"] = str(e)
+            overall_ok = False
+        results.append(entry)
+
+    payload: dict[str, Any] = {"status": "ok" if overall_ok else "degraded", "instances": results}
+    # Preserve the legacy single-instance shape for existing probes.
+    if len(results) == 1:
+        payload["circuit_breaker"] = results[0]["circuit_breaker"]
+        if results[0]["status"] != "ok" and "detail" in results[0]:
+            payload["detail"] = results[0]["detail"]
+    return JSONResponse(payload, status_code=200 if overall_ok else 503)
 
 
 def create_http_app(
@@ -93,7 +109,7 @@ def create_http_app(
             try:
                 yield
             finally:
-                await get_client().close()
+                await close_all()
 
     return Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
 
@@ -112,7 +128,7 @@ def main() -> None:
             app = create_http_app(server=server, settings=s)
 
             async def shutdown() -> None:
-                await get_client().close()
+                await close_all()
 
             for sig in (signal.SIGTERM, signal.SIGINT):
                 loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
@@ -131,8 +147,6 @@ def main() -> None:
         from mcp.server.stdio import stdio_server
 
         async def run_stdio() -> None:
-            from ariaops_mcp.client import get_client
-
             try:
                 async with stdio_server() as (read_stream, write_stream):
                     await server.run(
@@ -141,7 +155,7 @@ def main() -> None:
                         server.create_initialization_options(),
                     )
             finally:
-                await get_client().close()
+                await close_all()
 
         asyncio.run(run_stdio())
 
