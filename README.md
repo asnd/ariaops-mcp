@@ -141,6 +141,46 @@ Notes:
 - Roles (`realm_access.roles`, `resource_access.<client>.roles`) are not enforced — only OAuth `scope`. Map roles to scopes in Keycloak if you need RBAC.
 - The verifier wraps `PyJWKClient` in `asyncio.to_thread`, so a JWKS cache miss does not block the event loop.
 
+#### LDAP / Active Directory authentication
+
+MCP clients send HTTP Basic credentials; the server performs a direct LDAPS bind to verify them and reads `memberOf` to map AD group membership to `ariaops:{instance}:{access}` scopes.
+
+```bash
+ARIAOPS_TRANSPORT=http \
+ARIAOPS_HTTP_AUTH_MODE=ldap \
+ARIAOPS_LDAP_SERVER_URI="ldaps://dc1.corp.example.com:636" \
+ARIAOPS_LDAP_USER_DN_TEMPLATE="{username}@corp.example.com" \
+ARIAOPS_LDAP_USER_SEARCH_BASE="dc=corp,dc=example,dc=com" \
+ARIAOPS_LDAP_GROUP_SCOPE_MAP='{"vrops-prod-ro":["ariaops:prod:read"],"vrops-all":["ariaops:*:read"]}' \
+python -m ariaops_mcp
+```
+
+For generic LDAP (non-AD) replace the DN template:
+
+```bash
+ARIAOPS_LDAP_USER_DN_TEMPLATE="uid={username},ou=people,dc=corp,dc=com"
+```
+
+| Variable | Required | Default | Notes |
+|---|---|---|---|
+| `ARIAOPS_HTTP_AUTH_MODE` | no | `none` | Set to `ldap`. Also accepts `oauth`; replaces legacy `ARIAOPS_HTTP_OAUTH_ENABLED`. |
+| `ARIAOPS_LDAP_SERVER_URI` | yes* | — | `ldaps://` URI. Plain `ldap://` accepted only with `ARIAOPS_LDAP_VERIFY_TLS=false`. |
+| `ARIAOPS_LDAP_USER_DN_TEMPLATE` | yes* | — | AD UPN: `{username}@corp.example.com`. Generic LDAP: `uid={username},ou=people,dc=corp,dc=com`. |
+| `ARIAOPS_LDAP_USER_SEARCH_BASE` | yes* | — | Base DN for the `memberOf` search. |
+| `ARIAOPS_LDAP_GROUP_SCOPE_MAP` | yes* | — | JSON object: AD group CN or full DN → list of scopes. |
+| `ARIAOPS_LDAP_CA_CERT_FILE` | no | system trust | PEM bundle for the LDAPS server certificate. |
+| `ARIAOPS_LDAP_VERIFY_TLS` | no | `true` | Disable only for lab/testing — requires plain `ldap://`. |
+| `ARIAOPS_LDAP_CACHE_TTL` | no | `300` | Successful bind results cached this many seconds. |
+| `ARIAOPS_LDAP_BIND_TIMEOUT` | no | `10` | LDAP connection timeout in seconds. |
+
+*Required when `ARIAOPS_HTTP_AUTH_MODE=ldap`.
+
+**Scope format** matches OAuth mode: `ariaops:{instance}:{access}`. Use `ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES` as the baseline gate in LDAP mode too (e.g. `ariaops:*:read`).
+
+**Health:** `GET /health` remains unauthenticated in LDAP mode, same as OAuth.
+
+**vROps backend AD auth (Layer B):** set `ARIAOPS_AUTH_SOURCE=<source-name-in-vrops>` (e.g. `ActiveDirectory`) when the Aria Ops instance itself authenticates via AD.
+
 ### Run with Podman
 
 ```bash
@@ -281,16 +321,25 @@ cd test-ui && pytest tests
 | `ARIAOPS_VERIFY_SSL` | No | `true` | TLS certificate verification |
 | `ARIAOPS_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `ARIAOPS_PORT` | No | `8080` | HTTP listen port |
-| `ARIAOPS_HTTP_OAUTH_ENABLED` | No | `false` | Require OAuth 2.x bearer tokens on the HTTP MCP transport |
+| `ARIAOPS_HTTP_AUTH_MODE` | No | `none` | HTTP MCP auth mode: `oauth`, `ldap`, or `none`. Supersedes `ARIAOPS_HTTP_OAUTH_ENABLED`. |
+| `ARIAOPS_HTTP_OAUTH_ENABLED` | No | `false` | Legacy flag to enable OAuth mode (equivalent to `ARIAOPS_HTTP_AUTH_MODE=oauth`) |
 | `ARIAOPS_HTTP_OAUTH_ISSUER_URL` | No | — | OAuth 2.x issuer URL advertised to MCP clients when HTTP auth is enabled |
 | `ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL` | No | — | Public MCP HTTP endpoint URL used for OAuth protected-resource metadata |
 | `ARIAOPS_HTTP_OAUTH_JWT_KEY` | One of | — | HS* shared secret (≥32 bytes) or PEM public key for RS*/ES*/PS* |
 | `ARIAOPS_HTTP_OAUTH_JWKS_URL` | One of | — | JWKS endpoint (e.g. Keycloak certs URL); mutually exclusive with `JWT_KEY` |
 | `ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS` | No | `HS256` | Comma-separated or JSON-array list of accepted JWT algorithms |
 | `ARIAOPS_HTTP_OAUTH_AUDIENCE` | No | `ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL` | Expected JWT audience for HTTP bearer tokens |
-| `ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES` | No | — | Comma-separated or JSON-array list of scopes required for HTTP MCP access |
+| `ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES` | No | — | Scopes required for HTTP MCP access; enforced in both OAuth and LDAP mode |
 | `ARIAOPS_HTTP_OAUTH_LEEWAY_SECONDS` | No | `30` | Clock-skew tolerance for `exp`/`nbf`/`iat` |
 | `ARIAOPS_HTTP_OAUTH_JWKS_CACHE_TTL` | No | `300` | JWKS cache lifetime in seconds |
+| `ARIAOPS_LDAP_SERVER_URI` | No | — | LDAPS server URI, e.g. `ldaps://dc1.corp.example.com:636` |
+| `ARIAOPS_LDAP_USER_DN_TEMPLATE` | No | — | Bind DN template with `{username}` placeholder |
+| `ARIAOPS_LDAP_USER_SEARCH_BASE` | No | — | Base DN for `memberOf` search |
+| `ARIAOPS_LDAP_GROUP_SCOPE_MAP` | No | — | JSON object: AD group CN or full DN → scope list |
+| `ARIAOPS_LDAP_CA_CERT_FILE` | No | system trust | PEM bundle for LDAPS certificate verification |
+| `ARIAOPS_LDAP_VERIFY_TLS` | No | `true` | Verify LDAPS server certificate |
+| `ARIAOPS_LDAP_CACHE_TTL` | No | `300` | Successful bind result cache lifetime in seconds |
+| `ARIAOPS_LDAP_BIND_TIMEOUT` | No | `10` | LDAP connection timeout in seconds |
 | `ARIAOPS_LOG_LEVEL` | No | `INFO` | Log level |
 | `ARIAOPS_ENABLE_WRITE_OPERATIONS` | No | `false` | Enable mutating tools (alert management, maintenance, reports, resource lifecycle) |
 | `LITELLM_BASE_URL` | No | — | Test UI LLM gateway base URL |

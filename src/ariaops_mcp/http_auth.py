@@ -7,7 +7,10 @@ Scope format: ariaops:{instance}:{access} where access is 'read' or 'write'.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import urllib.error
+import urllib.request
 from typing import Any
 
 import jwt
@@ -17,6 +20,27 @@ from mcp.server.auth.provider import AccessToken, TokenVerifier
 from ariaops_mcp.config import Settings
 
 logger = logging.getLogger(__name__)
+
+
+class NoProxyPyJWKClient(PyJWKClient):
+    def fetch_data(self) -> Any:
+        jwk_set: Any = None
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            request = urllib.request.Request(url=self.uri, headers=self.headers)
+            with opener.open(request, timeout=self.timeout) as response:
+                jwk_set = json.load(response)
+        except (urllib.error.URLError, TimeoutError) as e:
+            if isinstance(e, urllib.error.HTTPError):
+                e.close()
+            raise jwt.PyJWKClientConnectionError(
+                f'Fail to fetch data from the url, err: "{e}"'
+            ) from e
+        else:
+            return jwk_set
+        finally:
+            if self.jwk_set_cache is not None:
+                self.jwk_set_cache.put(jwk_set)
 
 
 def _normalize_url_claim(value: object) -> str | None:
@@ -61,7 +85,7 @@ class JWTTokenVerifier(TokenVerifier):
         self._leeway = settings.http_oauth_leeway_seconds
         self._jwks_client: PyJWKClient | None = None
         if settings.http_oauth_jwks_url is not None:
-            self._jwks_client = PyJWKClient(
+            self._jwks_client = NoProxyPyJWKClient(
                 str(settings.http_oauth_jwks_url),
                 cache_keys=True,
                 lifespan=settings.http_oauth_jwks_cache_ttl,

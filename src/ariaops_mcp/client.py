@@ -35,6 +35,7 @@ class AriaOpsClient:
         password: str | None = None,
         auth_source: str | None = None,
         verify_ssl: bool | None = None,
+        trust_env: bool | None = None,
         max_concurrent_requests: int | None = None,
         request_deadline: float | None = None,
         cb_failure_threshold: int | None = None,
@@ -52,6 +53,7 @@ class AriaOpsClient:
                 password = password or settings.password
                 auth_source = auth_source if auth_source is not None else settings.auth_source
                 verify_ssl = verify_ssl if verify_ssl is not None else settings.verify_ssl
+                trust_env = trust_env if trust_env is not None else settings.trust_env
                 max_concurrent_requests = (
                     max_concurrent_requests if max_concurrent_requests is not None
                     else settings.max_concurrent_requests
@@ -78,6 +80,7 @@ class AriaOpsClient:
         # Apply defaults for any still-None values
         auth_source = auth_source or "local"
         verify_ssl = verify_ssl if verify_ssl is not None else True
+        trust_env = trust_env if trust_env is not None else True
         max_concurrent_requests = max_concurrent_requests or 10
         request_deadline = request_deadline or 120.0
         cb_failure_threshold = cb_failure_threshold or 5
@@ -90,6 +93,7 @@ class AriaOpsClient:
         self._password = password
         self._auth_source = auth_source
         self._verify_ssl = verify_ssl
+        self._trust_env = trust_env
         self._instance_name = instance_name
 
         self._token: str | None = None
@@ -181,6 +185,7 @@ class AriaOpsClient:
             self._http = httpx.AsyncClient(
                 base_url=self._base_url,
                 verify=self._verify_ssl,
+                trust_env=self._trust_env,
                 timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
                 headers={"Content-Type": "application/json", "Accept": "application/json"},
             )

@@ -25,6 +25,7 @@ dependencies = [
     "pydantic-settings>=2.3.0",
     "uvicorn>=0.30.0",
     "pyyaml>=6.0",
+    "ldap3>=2.9",
 ]
 
 [project.optional-dependencies]
