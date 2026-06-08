@@ -6,6 +6,7 @@ import httpx
 import pytest
 import respx
 
+from ariaops_mcp.tools._common import MAX_LIST_ITEMS, PAGE_SIZE_MAX, truncate_list_response
 from ariaops_mcp.tools.capacity import tool_handlers
 from tests.conftest import TOKEN_RESPONSE
 
@@ -227,3 +228,122 @@ async def test_get_trend_analysis_missing_args(handlers):
     data = json.loads(result)
     assert "error" in data
     assert "id" in data["error"] or "metric" in data["error"]
+
+
+# ---------------------------------------------------------------------------
+# PAGE_SIZE_MAX / pagination tests
+# ---------------------------------------------------------------------------
+
+def test_page_size_max_value():
+    assert PAGE_SIZE_MAX == 200
+
+
+def test_max_list_items_value():
+    assert MAX_LIST_ITEMS == 50
+
+
+def test_truncate_list_response_at_new_limit():
+    data = {"items": list(range(60))}
+    result = truncate_list_response(data, "items")
+    assert len(result["items"]) == 50
+    assert result["_truncated"] is True
+    assert result["_truncatedAt"] == 50
+
+
+def test_truncate_list_response_under_limit_not_truncated():
+    data = {"items": list(range(50))}
+    result = truncate_list_response(data, "items")
+    assert len(result["items"]) == 50
+    assert "_truncated" not in result
+
+
+@pytest.mark.asyncio
+async def test_get_capacity_overview_multi_page(handlers):
+    """get_capacity_overview must paginate until all resources are collected."""
+    page_calls: list[int] = []
+
+    def resources_side_effect(request: httpx.Request) -> httpx.Response:
+        page = int(request.url.params.get("page", 0))
+        page_size = int(request.url.params.get("pageSize", 50))
+        page_calls.append(page)
+        total = 250  # spans 2 full pages + 1 partial when pageSize=200; 2 pages when pageSize≥200
+        start = page * page_size
+        end = min(start + page_size, total)
+        resources = [{"identifier": f"res-{i}"} for i in range(start, end)]
+        return httpx.Response(
+            200,
+            json={
+                "resourceList": resources,
+                "pageInfo": {"totalCount": total, "page": page, "pageSize": page_size},
+            },
+        )
+
+    stats_response = {"values": []}
+
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/resources").mock(side_effect=resources_side_effect)
+        respx.post(f"{BASE}/resources/stats/latest/query").mock(
+            return_value=httpx.Response(200, json=stats_response)
+        )
+
+        result = await handlers["get_capacity_overview"]({"resourceKind": "ClusterComputeResource"})
+        data = json.loads(result)
+
+    assert data["resourceCount"] == 250
+    # With PAGE_SIZE_MAX=200, page 0 fetches 200 resources, page 1 fetches 50 → done
+    assert len(page_calls) == 2
+    assert page_calls == [0, 1]
+
+
+@pytest.mark.asyncio
+async def test_get_capacity_overview_single_page_exact_boundary(handlers):
+    """When totalCount == pageSize, only one request is made (no unnecessary second fetch)."""
+    page_calls: list[int] = []
+
+    def resources_side_effect(request: httpx.Request) -> httpx.Response:
+        page = int(request.url.params.get("page", 0))
+        page_size = int(request.url.params.get("pageSize", 50))
+        page_calls.append(page)
+        resources = [{"identifier": f"res-{i}"} for i in range(page_size)]
+        return httpx.Response(
+            200,
+            json={
+                "resourceList": resources,
+                "pageInfo": {"totalCount": page_size, "page": page, "pageSize": page_size},
+            },
+        )
+
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/resources").mock(side_effect=resources_side_effect)
+        respx.post(f"{BASE}/resources/stats/latest/query").mock(
+            return_value=httpx.Response(200, json={"values": []})
+        )
+
+        result = await handlers["get_capacity_overview"]({})
+        data = json.loads(result)
+
+    assert len(page_calls) == 1
+    assert data["resourceCount"] == PAGE_SIZE_MAX
+
+
+@pytest.mark.asyncio
+async def test_get_capacity_overview_uses_page_size_max(handlers):
+    """Verify the pageSize query param sent to the API equals PAGE_SIZE_MAX."""
+    sent_page_sizes: list[int] = []
+
+    def resources_side_effect(request: httpx.Request) -> httpx.Response:
+        sent_page_sizes.append(int(request.url.params.get("pageSize", 0)))
+        return httpx.Response(
+            200,
+            json={"resourceList": [], "pageInfo": {"totalCount": 0}},
+        )
+
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/resources").mock(side_effect=resources_side_effect)
+
+        await handlers["get_capacity_overview"]({})
+
+    assert sent_page_sizes == [PAGE_SIZE_MAX]

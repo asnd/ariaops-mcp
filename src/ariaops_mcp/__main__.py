@@ -74,7 +74,7 @@ def create_http_app(
     middleware: list[Middleware] = []
     mcp_endpoint: Any = streamable_http_app
 
-    if s.http_oauth_enabled:
+    if s.effective_auth_mode == "oauth":
         issuer_url = s.http_oauth_issuer_url
         resource_server_url = s.http_oauth_resource_server_url
         if issuer_url is None or resource_server_url is None:
@@ -99,6 +99,22 @@ def create_http_app(
             streamable_http_app,
             s.http_oauth_required_scopes,
             resource_metadata_url,
+        )
+    elif s.effective_auth_mode == "ldap":
+        from ariaops_mcp.ldap_auth import (
+            BasicLDAPAuthBackend,
+            BasicRequireAuthMiddleware,
+            LDAPAuthenticator,
+        )
+
+        authenticator = LDAPAuthenticator.from_settings(s)
+        middleware = [
+            Middleware(AuthenticationMiddleware, backend=BasicLDAPAuthBackend(authenticator)),
+            Middleware(AuthContextMiddleware),
+        ]
+        mcp_endpoint = BasicRequireAuthMiddleware(
+            streamable_http_app,
+            s.http_oauth_required_scopes,
         )
 
     routes.append(Route("/", endpoint=mcp_endpoint))
