@@ -255,7 +255,10 @@ def _current_claims() -> dict[str, Any] | None:
         return None
     if token is None:
         return None
-    return token.claims
+    # OAuth tokens (JWTTokenVerifier) carry claims; LDAP tokens attach them via
+    # the ClaimsAccessToken subclass. Use getattr so a token type without a
+    # claims field falls back to role/default resolution rather than erroring.
+    return getattr(token, "claims", None)
 
 
 def _resolve_principal_for_request() -> Principal:

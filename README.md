@@ -142,6 +142,39 @@ Notes:
 - Roles (`realm_access.roles`, `resource_access.<client>.roles`) are not enforced — only OAuth `scope`. Map roles to scopes in Keycloak if you need RBAC.
 - The verifier wraps `PyJWKClient` in `asyncio.to_thread`, so a JWKS cache miss does not block the event loop.
 
+#### LDAP / Active Directory authentication
+
+As an alternative to OAuth, the HTTP transport can authenticate MCP clients with
+**HTTP Basic** credentials verified against LDAPS. The server binds directly with
+the user's credentials (no service account), reads their `memberOf` groups, and
+maps them to the **same** `role`/`country`/`instance` claims the OAuth path uses —
+so [role-based access](#role-based-access) works identically.
+
+```bash
+ARIAOPS_TRANSPORT=http \
+ARIAOPS_HTTP_AUTH_MODE=ldap \
+ARIAOPS_LDAP_SERVER_URI="ldaps://dc1.corp.example.com:636" \
+ARIAOPS_LDAP_USER_DN_TEMPLATE="{username}@corp.example.com" \
+ARIAOPS_LDAP_USER_SEARCH_BASE="dc=corp,dc=example,dc=com" \
+ARIAOPS_LDAP_GROUP_ROLE_MAP='{"vrops-ops":{"role":"ops"},"vrops-se":{"role":"country","country":"SE"}}' \
+python -m ariaops_mcp
+```
+
+| Variable | Required | Default | Notes |
+|---|---|---|---|
+| `ARIAOPS_HTTP_AUTH_MODE` | yes | `none` | Set to `ldap`. Mutually exclusive with `ARIAOPS_HTTP_OAUTH_ENABLED`. |
+| `ARIAOPS_LDAP_SERVER_URI` | yes | — | `ldaps://` URI. Plain `ldap://` only allowed with `ARIAOPS_LDAP_VERIFY_TLS=false`. |
+| `ARIAOPS_LDAP_USER_DN_TEMPLATE` | yes | — | Bind DN with `{username}`. AD UPN `{username}@corp.example.com` or `uid={username},ou=people,dc=corp,dc=com`. |
+| `ARIAOPS_LDAP_USER_SEARCH_BASE` | yes | — | Base DN for the `memberOf` lookup. |
+| `ARIAOPS_LDAP_GROUP_ROLE_MAP` | no | `{}` | JSON: AD group CN/DN → `{"role":"ops"}` or `{"role":"country","country":"SE"}`/`{"role":"country","instance":"de"}`. An `ops` group wins over `country`. When empty, every authenticated user gets `ARIAOPS_DEFAULT_ROLE`. A bound user matching no mapped group is denied. |
+| `ARIAOPS_LDAP_CA_CERT_FILE` | no | system trust | PEM bundle for LDAPS verification. |
+| `ARIAOPS_LDAP_VERIFY_TLS` | no | `true` | Disable only for lab/testing. |
+| `ARIAOPS_LDAP_CACHE_TTL` | no | `300` | Seconds to cache a successful bind's claims. |
+| `ARIAOPS_LDAP_BIND_TIMEOUT` | no | `10` | LDAP connect timeout (seconds). |
+
+`/health` stays unauthenticated, and instance authorization is enforced by the
+same `principal` layer as OAuth — LDAP only decides the caller's role/instance.
+
 ### Run with Podman
 
 ```bash

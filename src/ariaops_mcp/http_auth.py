@@ -15,6 +15,18 @@ from ariaops_mcp.config import Settings
 logger = logging.getLogger(__name__)
 
 
+class ClaimsAccessToken(AccessToken):
+    """``AccessToken`` that also carries the decoded principal claims.
+
+    The base ``mcp`` ``AccessToken`` (1.x) has no ``claims``/``subject`` fields,
+    so the role/country/instance claims that :mod:`ariaops_mcp.principal` needs
+    are preserved here. ``server._current_claims()`` reads them via ``getattr``.
+    """
+
+    subject: str | None = None
+    claims: dict[str, Any] | None = None
+
+
 def _normalize_url_claim(value: object) -> str | None:
     if value is None:
         return None
@@ -106,7 +118,7 @@ class JWTTokenVerifier(TokenVerifier):
             logger.warning("Rejected HTTP OAuth bearer token without client identity claim")
             return None
 
-        return AccessToken(
+        return ClaimsAccessToken(
             token=token,
             client_id=str(client_id),
             scopes=_extract_scopes(claims),
