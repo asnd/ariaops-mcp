@@ -432,3 +432,90 @@ async def test_execute_skill_rejects_non_dict_arguments(mock_env, monkeypatch, t
     )
     data = json.loads(result)
     assert "must be an object" in data["error"]
+
+# ── Role-aware skill filtering (server wiring) ──────────────────────────────
+
+
+_RESTRICTED_SKILL = (
+    "---\nname: ops-tuning\ndescription: Ops-only skill\nroles:\n  - ops\n---\n\nOps body"
+)
+_OPEN_SKILL = "---\nname: open-skill\ndescription: Open skill\n---\n\nOpen body"
+
+
+def _setup_role_skills(monkeypatch, tmp_path) -> None:
+    (tmp_path / "ops.md").write_text(_RESTRICTED_SKILL)
+    (tmp_path / "open.md").write_text(_OPEN_SKILL)
+    monkeypatch.setenv(SKILL_DIR_VAR, str(tmp_path))
+    monkeypatch.setenv(
+        "ARIAOPS_INSTANCES",
+        '[{"id":"se","host":"se.example.com","username":"u","password":"p","country":"SE"},'
+        '{"id":"de","host":"de.example.com","username":"u","password":"p","country":"DE"}]',
+    )
+
+
+def _set_claims(monkeypatch, claims) -> None:
+    import ariaops_mcp.server as server_module
+
+    monkeypatch.setattr(server_module, "_current_claims", lambda: claims)
+
+
+@pytest.mark.asyncio
+async def test_list_skills_filtered_for_country_role(mock_env, monkeypatch, tmp_path):
+    _setup_role_skills(monkeypatch, tmp_path)
+    _set_claims(monkeypatch, {"ariaops_role": "country", "ariaops_country": "SE"})
+
+    server = create_server()
+    result = await server.request_handlers[CallToolRequest](
+        CallToolRequest(method="tools/call", params={"name": "list_skills", "arguments": {}})
+    )
+    data = json.loads(result.root.content[0].text)
+    assert [s["name"] for s in data] == ["open-skill"]
+
+
+@pytest.mark.asyncio
+async def test_list_skills_unfiltered_for_ops_role(mock_env, monkeypatch, tmp_path):
+    _setup_role_skills(monkeypatch, tmp_path)
+    _set_claims(monkeypatch, {"ariaops_role": "ops"})
+
+    server = create_server()
+    result = await server.request_handlers[CallToolRequest](
+        CallToolRequest(method="tools/call", params={"name": "list_skills", "arguments": {}})
+    )
+    data = json.loads(result.root.content[0].text)
+    assert sorted(s["name"] for s in data) == ["open-skill", "ops-tuning"]
+
+
+@pytest.mark.asyncio
+async def test_execute_restricted_skill_reports_not_found(mock_env, monkeypatch, tmp_path):
+    """A denied skill answers exactly like a missing one (anti-enumeration)."""
+    _setup_role_skills(monkeypatch, tmp_path)
+    _set_claims(monkeypatch, {"ariaops_role": "country", "ariaops_country": "SE"})
+
+    server = create_server()
+    result = await server.request_handlers[CallToolRequest](
+        CallToolRequest(
+            method="tools/call",
+            params={"name": "execute_skill", "arguments": {"name": "ops-tuning"}},
+        )
+    )
+    data = json.loads(result.root.content[0].text)
+    assert "Skill not found" in data["error"]
+    assert data["available"] == ["open-skill"]
+
+
+@pytest.mark.asyncio
+async def test_prompts_and_resources_filtered_for_country_role(mock_env, monkeypatch, tmp_path):
+    _setup_role_skills(monkeypatch, tmp_path)
+    _set_claims(monkeypatch, {"ariaops_role": "country", "ariaops_country": "SE"})
+
+    server = create_server()
+    prompts = await server.request_handlers[ListPromptsRequest](
+        ListPromptsRequest(method="prompts/list", params=None)
+    )
+    assert [p.name for p in prompts.root.prompts] == ["open-skill"]
+
+    resources = await server.request_handlers[ListResourcesRequest](
+        ListResourcesRequest(method="resources/list", params=None)
+    )
+    skill_uris = [str(r.uri) for r in resources.root.resources if str(r.uri).startswith("ariaops://skills/")]
+    assert skill_uris == ["ariaops://skills/open-skill"]

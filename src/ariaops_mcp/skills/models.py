@@ -41,6 +41,16 @@ class Skill(BaseModel):
     steps: list[SkillStep] = []
     body: str = ""
     source_path: str | None = None
+    # Optional access restrictions, matched against the request principal.
+    # Empty list = that dimension is unrestricted (backward compatible).
+    roles: list[str] = []
+    countries: list[str] = []
+    instances: list[str] = []
+
+    @field_validator("roles", "countries", "instances")
+    @classmethod
+    def normalize_restriction_lists(cls, values: list[str]) -> list[str]:
+        return [v.strip().lower() for v in values if v and v.strip()]
 
     @field_validator("name")
     @classmethod

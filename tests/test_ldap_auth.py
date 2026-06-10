@@ -595,3 +595,281 @@ def test_config_ldap_happy_path_and_group_map_parsing():
         "vrops-ops": {"role": "ops"},
         "vrops-se": {"role": "country", "country": "SE"},
     }
+
+
+# ── Search-then-bind ──────────────────────────────────────────────────────────
+
+
+class _FakeEntry:
+    def __init__(self, dn: str, member_of: list[str] | None = None) -> None:
+        self.entry_dn = dn
+        if member_of is not None:
+            self.memberOf = MagicMock()
+            self.memberOf.values = member_of
+            self.memberOf.__bool__ = lambda _self: bool(member_of)
+
+
+class _FakeConnection:
+    """Captures search calls; entries are set per-search by the test."""
+
+    def __init__(self, search_results: list[list[_FakeEntry]] | None = None) -> None:
+        self.searches: list[dict[str, Any]] = []
+        self._search_results = list(search_results or [])
+        self.entries: list[_FakeEntry] = []
+        self.unbound = False
+
+    def search(self, search_base: str, search_filter: str, **kwargs: Any) -> None:
+        self.searches.append({"base": search_base, "filter": search_filter, **kwargs})
+        self.entries = self._search_results.pop(0) if self._search_results else []
+
+    def unbind(self) -> None:
+        self.unbound = True
+
+
+def _make_search_bind_authenticator(**overrides: Any) -> LDAPAuthenticator:
+    kwargs: dict[str, Any] = dict(
+        server_uri="ldaps://dc.corp.example.com:636",
+        bind_dn="cn=svc,dc=corp,dc=example,dc=com",
+        bind_password="svc-secret",
+        user_search_base="dc=corp,dc=example,dc=com",
+        group_role_map={},
+        role_claim=ROLE_CLAIM,
+        country_claim=COUNTRY_CLAIM,
+        instance_claim=INSTANCE_CLAIM,
+        ops_role="ops",
+        country_role="country",
+        default_role="ops",
+        verify_tls=False,
+    )
+    kwargs.update(overrides)
+    return LDAPAuthenticator(**kwargs)
+
+
+def test_search_then_bind_happy_path():
+    auth = _make_search_bind_authenticator()
+    user_entry = _FakeEntry(
+        "cn=alice,ou=people,dc=corp,dc=example,dc=com",
+        member_of=["CN=vrops-ops,DC=corp,DC=example,DC=com"],
+    )
+    service_conn = _FakeConnection(search_results=[[user_entry]])
+    user_conn = _FakeConnection()
+    connections = [service_conn, user_conn]
+    bind_args: list[str] = []
+
+    def fake_connect(user: str, password: str) -> _FakeConnection:
+        bind_args.append(user)
+        return connections.pop(0)
+
+    auth._connect = fake_connect  # type: ignore[method-assign]
+    groups = auth._sync_bind_and_get_groups("alice", "secret")
+
+    assert groups == ["CN=vrops-ops,DC=corp,DC=example,DC=com"]
+    # Service account binds first, then the found DN with the user's password.
+    assert bind_args == [
+        "cn=svc,dc=corp,dc=example,dc=com",
+        "cn=alice,ou=people,dc=corp,dc=example,dc=com",
+    ]
+    assert service_conn.unbound and user_conn.unbound
+
+
+def test_search_then_bind_escapes_filter_injection():
+    """A crafted username must not be able to widen the search filter."""
+    auth = _make_search_bind_authenticator()
+    service_conn = _FakeConnection(search_results=[[]])
+    auth._connect = lambda user, password: service_conn  # type: ignore[method-assign]
+
+    auth._sync_bind_and_get_groups("*)(uid=*", "x")
+
+    rendered = service_conn.searches[0]["filter"]
+    assert "*)(uid=*" not in rendered
+    assert "\\2a\\29\\28uid=\\2a" in rendered.lower()
+
+
+def test_direct_bind_escapes_filter_injection():
+    """Regression: the direct-bind group search must escape the username too."""
+    auth = _make_authenticator()
+    conn = _FakeConnection(search_results=[[]])
+    auth._connect = lambda user, password: conn  # type: ignore[method-assign]
+    # _make_authenticator stubs _sync_bind_and_get_groups; call the real one.
+    LDAPAuthenticator._sync_direct_bind(auth, "*)(objectClass=*", "pw")
+
+    rendered = conn.searches[0]["filter"]
+    assert "*)(objectClass=*" not in rendered
+
+
+def test_search_then_bind_user_not_found_denies():
+    auth = _make_search_bind_authenticator()
+    auth._connect = lambda user, password: _FakeConnection(search_results=[[]])  # type: ignore[method-assign]
+    assert auth._sync_bind_and_get_groups("ghost", "pw") is None
+
+
+def test_search_then_bind_ambiguous_match_denies():
+    auth = _make_search_bind_authenticator()
+    entries = [_FakeEntry("cn=a,dc=corp"), _FakeEntry("cn=b,dc=corp")]
+    auth._connect = lambda user, password: _FakeConnection(search_results=[entries])  # type: ignore[method-assign]
+    assert auth._sync_bind_and_get_groups("dup", "pw") is None
+
+
+def test_search_then_bind_wrong_password_denies():
+    from ldap3.core.exceptions import LDAPBindError
+
+    auth = _make_search_bind_authenticator()
+    user_entry = _FakeEntry("cn=alice,dc=corp", member_of=["CN=g,DC=corp"])
+    service_conn = _FakeConnection(search_results=[[user_entry]])
+    calls = {"n": 0}
+
+    def fake_connect(user: str, password: str):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return service_conn
+        raise LDAPBindError("invalid credentials")
+
+    auth._connect = fake_connect  # type: ignore[method-assign]
+    assert auth._sync_bind_and_get_groups("alice", "wrong") is None
+
+
+def test_search_then_bind_service_account_failure_denies():
+    from ldap3.core.exceptions import LDAPBindError
+
+    auth = _make_search_bind_authenticator()
+
+    def fake_connect(user: str, password: str):
+        raise LDAPBindError("service account locked")
+
+    auth._connect = fake_connect  # type: ignore[method-assign]
+    assert auth._sync_bind_and_get_groups("alice", "secret") is None
+
+
+def test_search_then_bind_group_search_fallback():
+    """OpenLDAP without memberOf: groups come from a second search."""
+    auth = _make_search_bind_authenticator(
+        group_search_base="ou=groups,dc=corp,dc=example,dc=com",
+    )
+    user_entry = _FakeEntry("cn=alice,ou=people,dc=corp,dc=example,dc=com")
+    group_entry = _FakeEntry("cn=vrops-se,ou=groups,dc=corp,dc=example,dc=com")
+    service_conn = _FakeConnection(search_results=[[user_entry], [group_entry]])
+    user_conn = _FakeConnection()
+    connections = [service_conn, user_conn]
+    auth._connect = lambda user, password: connections.pop(0)  # type: ignore[method-assign]
+
+    groups = auth._sync_bind_and_get_groups("alice", "secret")
+
+    assert groups == ["cn=vrops-se,ou=groups,dc=corp,dc=example,dc=com"]
+    assert service_conn.searches[1]["base"] == "ou=groups,dc=corp,dc=example,dc=com"
+    assert "cn=alice" in service_conn.searches[1]["filter"]
+
+
+def test_starttls_uses_tls_before_bind(monkeypatch):
+    import ldap3
+
+    captured: dict[str, Any] = {}
+
+    class _SpyConnection:
+        def __init__(self, server, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(ldap3, "Connection", _SpyConnection)
+    auth = _make_search_bind_authenticator(
+        server_uri="ldap://dc.corp.example.com", starttls=True, receive_timeout=7
+    )
+    auth._server = object()  # skip real Server construction
+    auth._connect("cn=svc,dc=corp", "pw")
+
+    assert captured["auto_bind"] == ldap3.AUTO_BIND_TLS_BEFORE_BIND
+    assert captured["receive_timeout"] == 7
+
+
+def test_cache_key_is_salted_per_instance():
+    a = _make_search_bind_authenticator()
+    b = _make_search_bind_authenticator()
+    assert a._cache_key("alice", "pw") != b._cache_key("alice", "pw")
+
+
+# ── Config: search-then-bind / StartTLS / convenience vars ────────────────────
+
+
+def _search_bind_config(**extra: Any) -> dict[str, Any]:
+    return {
+        **_BASE,
+        "ARIAOPS_HTTP_AUTH_MODE": "ldap",
+        "ARIAOPS_LDAP_SERVER_URI": "ldaps://dc.corp.example.com:636",
+        "ARIAOPS_LDAP_BIND_DN": "cn=svc,dc=corp,dc=com",
+        "ARIAOPS_LDAP_BIND_PASSWORD": "svc-secret",
+        "ARIAOPS_LDAP_USER_SEARCH_BASE": "dc=corp,dc=com",
+        **extra,
+    }
+
+
+def test_config_search_then_bind_happy_path():
+    settings = Settings.model_validate(_search_bind_config())
+    assert settings.ldap_bind_dn == "cn=svc,dc=corp,dc=com"
+    assert settings.ldap_user_dn_template is None
+
+
+def test_config_rejects_both_bind_modes():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="only one of"):
+        Settings.model_validate(
+            _search_bind_config(ARIAOPS_LDAP_USER_DN_TEMPLATE="{username}@corp.example.com")
+        )
+
+
+def test_config_rejects_neither_bind_mode():
+    from pydantic import ValidationError
+
+    config = _search_bind_config()
+    del config["ARIAOPS_LDAP_BIND_DN"]
+    del config["ARIAOPS_LDAP_BIND_PASSWORD"]
+    with pytest.raises(ValidationError, match="either"):
+        Settings.model_validate(config)
+
+
+def test_config_bind_dn_requires_password():
+    from pydantic import ValidationError
+
+    config = _search_bind_config()
+    del config["ARIAOPS_LDAP_BIND_PASSWORD"]
+    with pytest.raises(ValidationError, match="BIND_PASSWORD"):
+        Settings.model_validate(config)
+
+
+def test_config_accepts_ldap_uri_with_starttls():
+    settings = Settings.model_validate(
+        _search_bind_config(
+            ARIAOPS_LDAP_SERVER_URI="ldap://dc.corp.example.com",
+            ARIAOPS_LDAP_STARTTLS=True,
+        )
+    )
+    assert settings.ldap_starttls is True
+
+
+def test_config_rejects_ldaps_with_starttls():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="STARTTLS"):
+        Settings.model_validate(_search_bind_config(ARIAOPS_LDAP_STARTTLS=True))
+
+
+def test_config_convenience_group_vars_merge_into_map():
+    settings = Settings.model_validate(
+        _search_bind_config(
+            ARIAOPS_LDAP_OPS_GROUP="vrops-ops",
+            ARIAOPS_LDAP_COUNTRY_GROUP_MAP='{"vrops-se": "SE", "vrops-de": "DE"}',
+        )
+    )
+    assert settings.ldap_group_role_map == {
+        "vrops-ops": {"role": "ops"},
+        "vrops-se": {"role": "country", "country": "SE"},
+        "vrops-de": {"role": "country", "country": "DE"},
+    }
+
+
+def test_config_explicit_group_map_wins_over_convenience_vars():
+    settings = Settings.model_validate(
+        _search_bind_config(
+            ARIAOPS_LDAP_OPS_GROUP="vrops-ops",
+            ARIAOPS_LDAP_GROUP_ROLE_MAP='{"vrops-ops": {"role": "country", "country": "SE"}}',
+        )
+    )
+    assert settings.ldap_group_role_map["vrops-ops"] == {"role": "country", "country": "SE"}

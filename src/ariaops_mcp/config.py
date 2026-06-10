@@ -103,11 +103,16 @@ class Settings(BaseSettings):
     http_oauth_audience: str | None = Field(None, alias="ARIAOPS_HTTP_OAUTH_AUDIENCE")
     http_oauth_leeway_seconds: int = Field(30, alias="ARIAOPS_HTTP_OAUTH_LEEWAY_SECONDS")
     http_oauth_jwks_cache_ttl: int = Field(300, alias="ARIAOPS_HTTP_OAUTH_JWKS_CACHE_TTL")
+    # OIDC discovery: resolve jwks_uri and signing algorithms from the issuer's
+    # /.well-known/openid-configuration at startup instead of configuring them.
+    http_oauth_discovery: bool = Field(False, alias="ARIAOPS_HTTP_OAUTH_DISCOVERY")
+    http_oauth_discovery_timeout: float = Field(10.0, alias="ARIAOPS_HTTP_OAUTH_DISCOVERY_TIMEOUT")
 
     # HTTP auth backend selector: "oauth" (JWT bearer), "ldap" (HTTP Basic +
-    # LDAPS bind), or "none". Defaults to "none"; http_oauth_enabled=true is a
-    # backward-compatible alias for "oauth" (see effective_auth_mode).
-    http_auth_mode: Literal["oauth", "ldap", "none"] = Field("none", alias="ARIAOPS_HTTP_AUTH_MODE")
+    # LDAPS bind), "both" (Bearer → OAuth, Basic → LDAP), or "none". Defaults
+    # to "none"; http_oauth_enabled=true is a backward-compatible alias for
+    # "oauth" (see effective_auth_mode).
+    http_auth_mode: Literal["oauth", "ldap", "both", "none"] = Field("none", alias="ARIAOPS_HTTP_AUTH_MODE")
 
     # LDAP/AD authentication (http_auth_mode=ldap). AD groups map to the same
     # role/country/instance claims that principal.py reads for OAuth.
@@ -122,6 +127,29 @@ class Settings(BaseSettings):
     ldap_verify_tls: bool = Field(True, alias="ARIAOPS_LDAP_VERIFY_TLS")
     ldap_cache_ttl: int = Field(300, alias="ARIAOPS_LDAP_CACHE_TTL")
     ldap_bind_timeout: int = Field(10, alias="ARIAOPS_LDAP_BIND_TIMEOUT")
+    # Search-then-bind: a service account searches for the user's DN, then the
+    # server re-binds as that DN with the supplied password. Setting BIND_DN
+    # selects this mode (mutually exclusive with USER_DN_TEMPLATE direct-bind).
+    ldap_bind_dn: str | None = Field(None, alias="ARIAOPS_LDAP_BIND_DN")
+    ldap_bind_password: str | None = Field(None, alias="ARIAOPS_LDAP_BIND_PASSWORD")
+    ldap_user_filter: str = Field(
+        "(|(uid={username})(sAMAccountName={username})(userPrincipalName={username}))",
+        alias="ARIAOPS_LDAP_USER_FILTER",
+    )
+    ldap_starttls: bool = Field(False, alias="ARIAOPS_LDAP_STARTTLS")
+    ldap_receive_timeout: int = Field(10, alias="ARIAOPS_LDAP_RECEIVE_TIMEOUT")
+    # Group-search fallback for directories without memberOf (plain OpenLDAP).
+    ldap_group_search_base: str | None = Field(None, alias="ARIAOPS_LDAP_GROUP_SEARCH_BASE")
+    ldap_group_filter: str = Field(
+        "(|(member={user_dn})(uniqueMember={user_dn}))",
+        alias="ARIAOPS_LDAP_GROUP_FILTER",
+    )
+    # Convenience shortcuts merged into ldap_group_role_map (explicit map wins).
+    ldap_ops_group: str | None = Field(None, alias="ARIAOPS_LDAP_OPS_GROUP")
+    ldap_country_group_map: Annotated[dict[str, str], NoDecode] = Field(
+        default_factory=dict,
+        alias="ARIAOPS_LDAP_COUNTRY_GROUP_MAP",
+    )
 
     # Resilience
     request_deadline: float = Field(120.0, alias="ARIAOPS_REQUEST_DEADLINE")
@@ -171,6 +199,37 @@ class Settings(BaseSettings):
                 raise ValueError("ARIAOPS_LDAP_GROUP_ROLE_MAP must be a JSON object")
             return {str(k): {str(ik): str(iv) for ik, iv in v.items()} for k, v in parsed.items()}
         raise ValueError("Expected a JSON object string or dict for ARIAOPS_LDAP_GROUP_ROLE_MAP")
+
+    @field_validator("ldap_country_group_map", mode="before")
+    @classmethod
+    def parse_country_group_map(cls, value: Any) -> dict[str, str]:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return {str(k): str(v) for k, v in value.items()}
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return {}
+            parsed = json.loads(stripped)
+            if not isinstance(parsed, dict):
+                raise ValueError("ARIAOPS_LDAP_COUNTRY_GROUP_MAP must be a JSON object")
+            return {str(k): str(v) for k, v in parsed.items()}
+        raise ValueError("Expected a JSON object string or dict for ARIAOPS_LDAP_COUNTRY_GROUP_MAP")
+
+    @model_validator(mode="after")
+    def merge_ldap_group_shortcuts(self) -> "Settings":
+        """Fold ARIAOPS_LDAP_OPS_GROUP / _COUNTRY_GROUP_MAP into ldap_group_role_map."""
+        merged: dict[str, dict[str, str]] = {}
+        if self.ldap_ops_group:
+            merged[self.ldap_ops_group] = {"role": self.ops_role}
+        for group, country in self.ldap_country_group_map.items():
+            merged[group] = {"role": self.country_role, "country": country}
+        if merged:
+            # Explicit ARIAOPS_LDAP_GROUP_ROLE_MAP entries win on collision.
+            merged.update(self.ldap_group_role_map)
+            self.ldap_group_role_map = merged
+        return self
 
     @field_validator("host")
     @classmethod
@@ -296,7 +355,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_http_oauth(self) -> "Settings":
         # Activate when explicitly enabled (legacy flag) or selected via mode.
-        if not self.http_oauth_enabled and self.http_auth_mode != "oauth":
+        if not self.http_oauth_enabled and self.http_auth_mode not in ("oauth", "both"):
             return self
         if self.transport != "http":
             raise ValueError("ARIAOPS_HTTP_OAUTH_ENABLED requires ARIAOPS_TRANSPORT=http")
@@ -308,6 +367,35 @@ class Settings(BaseSettings):
         missing = [name for name, value in required_fields.items() if not value]
         if missing:
             raise ValueError(f"HTTP OAuth requires: {', '.join(missing)}")
+
+        if self.http_oauth_discovery:
+            # jwks_uri and algorithms come from the issuer's discovery document
+            # at startup (see ariaops_mcp.oidc); static key material conflicts.
+            if self.http_oauth_jwt_key:
+                raise ValueError(
+                    "ARIAOPS_HTTP_OAUTH_DISCOVERY=true is incompatible with "
+                    "ARIAOPS_HTTP_OAUTH_JWT_KEY — discovery uses the issuer's JWKS."
+                )
+            if self.http_oauth_jwks_url:
+                raise ValueError(
+                    "ARIAOPS_HTTP_OAUTH_DISCOVERY=true provides the JWKS URL — "
+                    "remove ARIAOPS_HTTP_OAUTH_JWKS_URL."
+                )
+            if self.http_oauth_discovery_timeout <= 0:
+                raise ValueError("ARIAOPS_HTTP_OAUTH_DISCOVERY_TIMEOUT must be > 0")
+            explicit_algs = "http_oauth_jwt_algorithms" in self.model_fields_set
+            if explicit_algs:
+                hmac = {a for a in self.http_oauth_jwt_algorithms if a.startswith("HS")}
+                if hmac or not self.http_oauth_jwt_algorithms:
+                    raise ValueError(
+                        "ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS must list asymmetric "
+                        "algorithms (RS*/ES*/PS*) when discovery is enabled."
+                    )
+            if self.http_oauth_leeway_seconds < 0:
+                raise ValueError("ARIAOPS_HTTP_OAUTH_LEEWAY_SECONDS must be >= 0")
+            if self.http_oauth_jwks_cache_ttl < 0:
+                raise ValueError("ARIAOPS_HTTP_OAUTH_JWKS_CACHE_TTL must be >= 0")
+            return self
 
         if self.http_oauth_provider == "keycloak":
             use_provider_jwks = not self.http_oauth_jwt_key
@@ -326,7 +414,8 @@ class Settings(BaseSettings):
             raise ValueError(
                 "HTTP OAuth requires one of ARIAOPS_HTTP_OAUTH_JWT_KEY "
                 "(static secret/PEM) or ARIAOPS_HTTP_OAUTH_JWKS_URL (e.g. Keycloak's "
-                "/realms/<realm>/protocol/openid-connect/certs)"
+                "/realms/<realm>/protocol/openid-connect/certs), or enable "
+                "ARIAOPS_HTTP_OAUTH_DISCOVERY=true"
             )
         if self.http_oauth_jwt_key and self.http_oauth_jwks_url:
             raise ValueError(
@@ -364,37 +453,62 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_http_ldap(self) -> "Settings":
-        if self.http_auth_mode != "ldap":
+        if self.http_auth_mode not in ("ldap", "both"):
             return self
         if self.transport != "http":
-            raise ValueError("ARIAOPS_HTTP_AUTH_MODE=ldap requires ARIAOPS_TRANSPORT=http")
+            raise ValueError(
+                f"ARIAOPS_HTTP_AUTH_MODE={self.http_auth_mode} requires ARIAOPS_TRANSPORT=http"
+            )
 
         missing: list[str] = []
         if not self.ldap_server_uri:
             missing.append("ARIAOPS_LDAP_SERVER_URI")
-        if not self.ldap_user_dn_template:
-            missing.append("ARIAOPS_LDAP_USER_DN_TEMPLATE")
         if not self.ldap_user_search_base:
             missing.append("ARIAOPS_LDAP_USER_SEARCH_BASE")
         if missing:
             raise ValueError(f"LDAP auth requires: {', '.join(missing)}")
 
-        uri = self.ldap_server_uri or ""
-        if not uri.lower().startswith("ldaps://") and self.ldap_verify_tls:
+        # Exactly one bind mode: direct-bind (DN template) or search-then-bind
+        # (service account).
+        if self.ldap_user_dn_template and self.ldap_bind_dn:
             raise ValueError(
-                "ARIAOPS_LDAP_SERVER_URI must use ldaps:// when "
-                "ARIAOPS_LDAP_VERIFY_TLS=true (default). Use ldaps:// or set "
-                "ARIAOPS_LDAP_VERIFY_TLS=false (not recommended for production)."
+                "Set only one of ARIAOPS_LDAP_USER_DN_TEMPLATE (direct-bind) or "
+                "ARIAOPS_LDAP_BIND_DN (search-then-bind), not both."
+            )
+        if not self.ldap_user_dn_template and not self.ldap_bind_dn:
+            raise ValueError(
+                "LDAP auth requires either ARIAOPS_LDAP_USER_DN_TEMPLATE "
+                "(direct-bind) or ARIAOPS_LDAP_BIND_DN + ARIAOPS_LDAP_BIND_PASSWORD "
+                "(search-then-bind with a service account)."
+            )
+        if self.ldap_bind_dn and not self.ldap_bind_password:
+            raise ValueError("ARIAOPS_LDAP_BIND_DN requires ARIAOPS_LDAP_BIND_PASSWORD")
+
+        uri = self.ldap_server_uri or ""
+        is_ldaps = uri.lower().startswith("ldaps://")
+        if is_ldaps and self.ldap_starttls:
+            raise ValueError(
+                "ARIAOPS_LDAP_STARTTLS=true is for ldap:// URIs — ldaps:// is "
+                "already TLS from the first byte. Use one or the other."
+            )
+        if not is_ldaps and not self.ldap_starttls and self.ldap_verify_tls:
+            raise ValueError(
+                "ARIAOPS_LDAP_SERVER_URI must use ldaps:// (or ldap:// with "
+                "ARIAOPS_LDAP_STARTTLS=true) when ARIAOPS_LDAP_VERIFY_TLS=true "
+                "(default). Otherwise set ARIAOPS_LDAP_VERIFY_TLS=false "
+                "(not recommended for production)."
             )
 
         if self.ldap_cache_ttl < 0:
             raise ValueError("ARIAOPS_LDAP_CACHE_TTL must be >= 0")
         if self.ldap_bind_timeout <= 0:
             raise ValueError("ARIAOPS_LDAP_BIND_TIMEOUT must be > 0")
+        if self.ldap_receive_timeout <= 0:
+            raise ValueError("ARIAOPS_LDAP_RECEIVE_TIMEOUT must be > 0")
         return self
 
     @property
-    def effective_auth_mode(self) -> Literal["oauth", "ldap", "none"]:
+    def effective_auth_mode(self) -> Literal["oauth", "ldap", "both", "none"]:
         """Resolved HTTP auth mode, honoring the legacy http_oauth_enabled flag."""
         if self.http_auth_mode != "none":
             return self.http_auth_mode

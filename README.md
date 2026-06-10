@@ -90,6 +90,27 @@ python -m ariaops_mcp
 | `ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES` | no | `[]` | Tokens must carry every listed scope or get a 403 `insufficient_scope`. |
 | `ARIAOPS_HTTP_OAUTH_LEEWAY_SECONDS` | no | `30` | Clock-skew tolerance for `exp` / `nbf` / `iat`. |
 | `ARIAOPS_HTTP_OAUTH_JWKS_CACHE_TTL` | no | `300` | How long (s) to cache JWKS keys before refetching. |
+| `ARIAOPS_HTTP_OAUTH_DISCOVERY` | no | `false` | Resolve the JWKS URL and signing algorithms from the issuer's `/.well-known/openid-configuration` at startup. Replaces `JWT_KEY`/`JWKS_URL` (setting either alongside discovery is an error). |
+| `ARIAOPS_HTTP_OAUTH_DISCOVERY_TIMEOUT` | no | `10` | Timeout (s) for fetching the discovery document. |
+
+**OIDC discovery (any IdP):** instead of configuring the JWKS URL and
+algorithms by hand, let the server read them from the issuer:
+
+```bash
+ARIAOPS_TRANSPORT=http \
+ARIAOPS_HTTP_OAUTH_ENABLED=true \
+ARIAOPS_HTTP_OAUTH_DISCOVERY=true \
+ARIAOPS_HTTP_OAUTH_ISSUER_URL=https://idp.example.com \
+ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL=https://mcp.example.com \
+python -m ariaops_mcp
+```
+
+Discovery runs once at startup and fails fast (clear error, no server) when the
+document can't be fetched, its `issuer` doesn't match, or it advertises no
+asymmetric algorithms. Setting `ARIAOPS_HTTP_OAUTH_JWT_ALGORITHMS` explicitly
+overrides the advertised algorithms. Key *rotation* is still picked up at
+runtime via the JWKS cache TTL; only a change of the JWKS URL itself requires a
+restart.
 
 **Discovery:** With OAuth enabled, the server publishes
 `GET /.well-known/oauth-protected-resource` per RFC 9728 so MCP clients
@@ -144,36 +165,72 @@ Notes:
 
 #### LDAP / Active Directory authentication
 
-As an alternative to OAuth, the HTTP transport can authenticate MCP clients with
-**HTTP Basic** credentials verified against LDAPS. The server binds directly with
-the user's credentials (no service account), reads their `memberOf` groups, and
-maps them to the **same** `role`/`country`/`instance` claims the OAuth path uses —
-so [role-based access](#role-based-access) works identically.
+As an alternative (or in addition) to OAuth, the HTTP transport can authenticate
+MCP clients with **HTTP Basic** credentials verified against LDAP. The user's
+groups are mapped to the **same** `role`/`country`/`instance` claims the OAuth
+path uses — so [role-based access](#role-based-access) works identically.
+
+Two bind modes (set exactly one):
+
+* **Search-then-bind** (recommended; AD and OpenLDAP): a service account
+  (`ARIAOPS_LDAP_BIND_DN`) searches for the user's entry with
+  `ARIAOPS_LDAP_USER_FILTER`, then the server re-binds as the found DN with the
+  supplied password. Login names like AD `sAMAccountName`/UPN or OpenLDAP `uid`
+  all work, regardless of where users live in the tree.
+* **Direct-bind** (`ARIAOPS_LDAP_USER_DN_TEMPLATE`): no service account; the
+  username is substituted into a DN template and bound directly. Simple, but
+  requires a uniform DN shape (typical for AD UPNs).
 
 ```bash
 ARIAOPS_TRANSPORT=http \
 ARIAOPS_HTTP_AUTH_MODE=ldap \
 ARIAOPS_LDAP_SERVER_URI="ldaps://dc1.corp.example.com:636" \
-ARIAOPS_LDAP_USER_DN_TEMPLATE="{username}@corp.example.com" \
+ARIAOPS_LDAP_BIND_DN="cn=svc-mcp,ou=service,dc=corp,dc=example,dc=com" \
+ARIAOPS_LDAP_BIND_PASSWORD="$SVC_PASSWORD" \
 ARIAOPS_LDAP_USER_SEARCH_BASE="dc=corp,dc=example,dc=com" \
-ARIAOPS_LDAP_GROUP_ROLE_MAP='{"vrops-ops":{"role":"ops"},"vrops-se":{"role":"country","country":"SE"}}' \
+ARIAOPS_LDAP_OPS_GROUP="vrops-ops" \
+ARIAOPS_LDAP_COUNTRY_GROUP_MAP='{"vrops-se":"SE","vrops-de":"DE"}' \
 python -m ariaops_mcp
 ```
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
-| `ARIAOPS_HTTP_AUTH_MODE` | yes | `none` | Set to `ldap`. Mutually exclusive with `ARIAOPS_HTTP_OAUTH_ENABLED`. |
-| `ARIAOPS_LDAP_SERVER_URI` | yes | — | `ldaps://` URI. Plain `ldap://` only allowed with `ARIAOPS_LDAP_VERIFY_TLS=false`. |
-| `ARIAOPS_LDAP_USER_DN_TEMPLATE` | yes | — | Bind DN with `{username}`. AD UPN `{username}@corp.example.com` or `uid={username},ou=people,dc=corp,dc=com`. |
-| `ARIAOPS_LDAP_USER_SEARCH_BASE` | yes | — | Base DN for the `memberOf` lookup. |
-| `ARIAOPS_LDAP_GROUP_ROLE_MAP` | no | `{}` | JSON: AD group CN/DN → `{"role":"ops"}` or `{"role":"country","country":"SE"}`/`{"role":"country","instance":"de"}`. An `ops` group wins over `country`. When empty, every authenticated user gets `ARIAOPS_DEFAULT_ROLE`. A bound user matching no mapped group is denied. |
-| `ARIAOPS_LDAP_CA_CERT_FILE` | no | system trust | PEM bundle for LDAPS verification. |
+| `ARIAOPS_HTTP_AUTH_MODE` | yes | `none` | `ldap`, or `both` to accept OAuth Bearer **and** LDAP Basic side by side. |
+| `ARIAOPS_LDAP_SERVER_URI` | yes | — | `ldaps://` URI, or `ldap://` with `ARIAOPS_LDAP_STARTTLS=true`. Plaintext only with `ARIAOPS_LDAP_VERIFY_TLS=false` (labs only). |
+| `ARIAOPS_LDAP_BIND_DN` / `ARIAOPS_LDAP_BIND_PASSWORD` | one mode | — | Service account for search-then-bind. |
+| `ARIAOPS_LDAP_USER_FILTER` | no | `(\|(uid={username})(sAMAccountName={username})(userPrincipalName={username}))` | Search filter for search-then-bind; `{username}` is escaped before substitution. |
+| `ARIAOPS_LDAP_USER_DN_TEMPLATE` | one mode | — | Direct-bind DN with `{username}`, e.g. `{username}@corp.example.com`. |
+| `ARIAOPS_LDAP_USER_SEARCH_BASE` | yes | — | Base DN for user/`memberOf` lookups. |
+| `ARIAOPS_LDAP_GROUP_ROLE_MAP` | no | `{}` | JSON: group CN/DN → `{"role":"ops"}` or `{"role":"country","country":"SE"}`/`{"role":"country","instance":"de"}`. An `ops` group wins over `country`. When empty (and no shortcut vars), every authenticated user gets `ARIAOPS_DEFAULT_ROLE`. A bound user matching no mapped group is denied. |
+| `ARIAOPS_LDAP_OPS_GROUP` | no | — | Shortcut: this group gets the `ops` role. Merged into the map above. |
+| `ARIAOPS_LDAP_COUNTRY_GROUP_MAP` | no | `{}` | Shortcut: JSON group → country code, e.g. `{"vrops-se":"SE"}`. Merged into the map above (explicit map entries win). |
+| `ARIAOPS_LDAP_GROUP_SEARCH_BASE` / `ARIAOPS_LDAP_GROUP_FILTER` | no | — / `(\|(member={user_dn})(uniqueMember={user_dn}))` | Fallback group search for directories without `memberOf` (plain OpenLDAP). Search-then-bind only. |
+| `ARIAOPS_LDAP_STARTTLS` | no | `false` | Upgrade an `ldap://` connection with StartTLS before binding. Invalid with `ldaps://`. |
+| `ARIAOPS_LDAP_CA_CERT_FILE` | no | system trust | PEM bundle for TLS verification. |
 | `ARIAOPS_LDAP_VERIFY_TLS` | no | `true` | Disable only for lab/testing. |
-| `ARIAOPS_LDAP_CACHE_TTL` | no | `300` | Seconds to cache a successful bind's claims. |
+| `ARIAOPS_LDAP_CACHE_TTL` | no | `300` | Seconds to cache a successful bind's claims (failures are never cached; the cache key is salted per process and never stores the password). |
 | `ARIAOPS_LDAP_BIND_TIMEOUT` | no | `10` | LDAP connect timeout (seconds). |
+| `ARIAOPS_LDAP_RECEIVE_TIMEOUT` | no | `10` | LDAP response timeout (seconds). |
 
 `/health` stays unauthenticated, and instance authorization is enforced by the
 same `principal` layer as OAuth — LDAP only decides the caller's role/instance.
+
+#### Dual auth: OAuth + LDAP together
+
+`ARIAOPS_HTTP_AUTH_MODE=both` accepts either credential on the same endpoint —
+the `Authorization` scheme picks the path (`Bearer` → JWT verification,
+`Basic` → LDAP bind). Configure both the `ARIAOPS_HTTP_OAUTH_*` and
+`ARIAOPS_LDAP_*` variable sets; an unauthenticated request gets a 401 carrying
+both `WWW-Authenticate` challenges.
+
+```bash
+# Same server, either credential:
+curl -H "Authorization: Bearer $TOKEN" https://mcp.example.com/
+curl -u alice:secret https://mcp.example.com/
+```
+
+`ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES` applies to Bearer tokens only — LDAP users
+carry no scopes and are authorized per-instance by their mapped role instead.
 
 ### Run with Podman
 
@@ -228,6 +285,33 @@ single `default` instance is synthesized and existing behavior is unchanged.
 | `ARIAOPS_DEFAULT_ROLE` | `ops` | Role assumed when no JWT role claim is present (e.g. stdio) |
 | `ARIAOPS_DEFAULT_COUNTRY` | — | Country assumed for a country-role caller without a claim |
 | `ARIAOPS_DEFAULT_INSTANCE` | — | Default instance id for `ops` callers and the synthesized single instance |
+
+### Restricting skills by role
+
+Skills (Markdown files with YAML frontmatter, loaded from
+`ARIAOPS_SKILLS_DIR`) can optionally be limited to certain principals. Add any
+of `roles:`, `countries:`, or `instances:` to the frontmatter — every declared
+dimension must match the caller (values within one dimension are ORed); omitted
+dimensions stay unrestricted, so existing skills are unaffected.
+
+```markdown
+---
+name: capacity-review-emea
+description: Quarterly capacity review for EMEA instances
+roles:
+  - ops
+countries:
+  - SE
+  - DE
+---
+
+Skill body…
+```
+
+Restricted skills are filtered out of `list_skills`, MCP prompts, and MCP
+resources for callers that don't match, and `execute_skill`/`get_prompt`
+answer with the same *not found* error as a nonexistent skill, so restricted
+skill names can't be enumerated.
 
 ## MCP Architecture
 
