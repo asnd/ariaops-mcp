@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Literal
 
 import jwt
 from jwt import PyJWKClient
@@ -25,6 +25,10 @@ class ClaimsAccessToken(AccessToken):
 
     subject: str | None = None
     claims: dict[str, Any] | None = None
+    # Which authentication path produced this token. Scope enforcement only
+    # applies to OAuth — LDAP-derived tokens carry no scopes and are
+    # authorized per-instance by ariaops_mcp.principal instead.
+    auth_method: Literal["oauth", "ldap"] | None = None
 
 
 def _normalize_url_claim(value: object) -> str | None:
@@ -126,4 +130,5 @@ class JWTTokenVerifier(TokenVerifier):
             resource=self._audience,
             subject=claims.get("sub"),
             claims=claims,
+            auth_method="oauth",
         )

@@ -74,7 +74,13 @@ def create_http_app(
     middleware: list[Middleware] = []
     mcp_endpoint: Any = streamable_http_app
 
-    if s.effective_auth_mode == "oauth":
+    mode = s.effective_auth_mode
+    bearer_backend: Any = None
+    basic_backend: Any = None
+    challenges: list[str] = []
+    resource_metadata_url: Any = None
+
+    if mode in ("oauth", "both"):
         issuer_url = s.http_oauth_issuer_url
         resource_server_url = s.http_oauth_resource_server_url
         if issuer_url is None or resource_server_url is None:
@@ -82,12 +88,27 @@ def create_http_app(
                 "OAuth is enabled but issuer/resource-server URLs are missing — "
                 "this should have been caught by Settings validation."
             )
-        verifier = JWTTokenVerifier(s)
-        middleware = [
-            Middleware(AuthenticationMiddleware, backend=BearerAuthBackend(verifier)),
-            Middleware(AuthContextMiddleware),
-        ]
+        verifier_settings = s
+        if s.http_oauth_discovery:
+            from pydantic import AnyHttpUrl, TypeAdapter
+
+            from ariaops_mcp.oidc import discover_oidc_config
+
+            discovered = discover_oidc_config(
+                str(issuer_url), timeout=s.http_oauth_discovery_timeout
+            )
+            update: dict[str, Any] = {
+                "http_oauth_jwks_url": TypeAdapter(AnyHttpUrl).validate_python(
+                    discovered.jwks_uri
+                ),
+            }
+            # An explicitly configured algorithm list wins over the issuer's.
+            if "http_oauth_jwt_algorithms" not in s.model_fields_set:
+                update["http_oauth_jwt_algorithms"] = discovered.algorithms
+            verifier_settings = s.model_copy(update=update)
+        bearer_backend = BearerAuthBackend(JWTTokenVerifier(verifier_settings))
         resource_metadata_url = build_resource_metadata_url(resource_server_url)
+        challenges.append(f'Bearer resource_metadata="{resource_metadata_url}"')
         routes.extend(
             create_protected_resource_routes(
                 resource_url=resource_server_url,
@@ -95,27 +116,39 @@ def create_http_app(
                 scopes_supported=s.http_oauth_required_scopes,
             )
         )
-        mcp_endpoint = RequireAuthMiddleware(
-            streamable_http_app,
-            s.http_oauth_required_scopes,
-            resource_metadata_url,
-        )
-    elif s.effective_auth_mode == "ldap":
-        from ariaops_mcp.ldap_auth import (
-            BasicLDAPAuthBackend,
-            BasicRequireAuthMiddleware,
-            LDAPAuthenticator,
-        )
 
-        authenticator = LDAPAuthenticator.from_settings(s)
+    if mode in ("ldap", "both"):
+        from ariaops_mcp.ldap_auth import BASIC_CHALLENGE, BasicLDAPAuthBackend, LDAPAuthenticator
+
+        basic_backend = BasicLDAPAuthBackend(LDAPAuthenticator.from_settings(s))
+        challenges.append(BASIC_CHALLENGE)
+
+    if mode != "none":
+        from ariaops_mcp.ldap_auth import CompositeAuthBackend, RequireAnyAuthMiddleware
+
+        if mode == "oauth":
+            backend = bearer_backend
+        elif mode == "ldap":
+            backend = basic_backend
+        else:
+            backend = CompositeAuthBackend(bearer_backend, basic_backend)
         middleware = [
-            Middleware(AuthenticationMiddleware, backend=BasicLDAPAuthBackend(authenticator)),
+            Middleware(AuthenticationMiddleware, backend=backend),
             Middleware(AuthContextMiddleware),
         ]
-        mcp_endpoint = BasicRequireAuthMiddleware(
-            streamable_http_app,
-            s.http_oauth_required_scopes,
-        )
+        if mode == "oauth":
+            # Keep the SDK gate in pure-OAuth mode (same 401 shape as before).
+            mcp_endpoint = RequireAuthMiddleware(
+                streamable_http_app,
+                s.http_oauth_required_scopes,
+                resource_metadata_url,
+            )
+        else:
+            mcp_endpoint = RequireAnyAuthMiddleware(
+                streamable_http_app,
+                s.http_oauth_required_scopes,
+                challenges,
+            )
 
     routes.append(Route("/", endpoint=mcp_endpoint))
 

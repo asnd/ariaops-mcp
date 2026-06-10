@@ -18,11 +18,12 @@ import base64
 import hashlib
 import json
 import logging
+import secrets
 import time
 from typing import TYPE_CHECKING, Any
 
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
-from starlette.authentication import AuthCredentials, AuthenticationBackend
+from starlette.authentication import AuthCredentials, AuthenticationBackend, BaseUser
 from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -106,20 +107,30 @@ def map_groups_to_claims(
 
 
 class LDAPAuthenticator:
-    """Direct-bind LDAP/AD authenticator with an in-memory claims cache.
+    """LDAP/AD authenticator with an in-memory claims cache.
 
-    Binds with the user's own credentials (no service account), reads
-    ``memberOf`` to derive principal claims, and caches the result for
-    ``cache_ttl`` seconds. Failed binds are never cached so that a password
-    change takes effect immediately.
+    Two bind modes:
+
+    * **Direct-bind** (``user_dn_template``): binds with the user's own
+      credentials by substituting the username into a DN template, then reads
+      ``memberOf`` from the user's entry.
+    * **Search-then-bind** (``bind_dn``): a service account searches for the
+      user's entry (works for AD ``sAMAccountName``/UPN logins and OpenLDAP
+      ``uid``), then a second bind as the found DN verifies the password.
+
+    Successful results are cached for ``cache_ttl`` seconds. Failed binds are
+    never cached so that a password change takes effect immediately.
     """
 
     def __init__(
         self,
         *,
         server_uri: str,
-        user_dn_template: str,
         user_search_base: str,
+        user_dn_template: str | None = None,
+        bind_dn: str | None = None,
+        bind_password: str | None = None,
+        user_filter: str = "(|(uid={username})(sAMAccountName={username})(userPrincipalName={username}))",
         group_role_map: dict[str, dict[str, str]],
         role_claim: str,
         country_claim: str,
@@ -129,11 +140,18 @@ class LDAPAuthenticator:
         default_role: str | None = None,
         ca_cert_file: str | None = None,
         verify_tls: bool = True,
+        starttls: bool = False,
         bind_timeout: int = 10,
+        receive_timeout: int = 10,
         cache_ttl: int = 300,
+        group_search_base: str | None = None,
+        group_filter: str = "(|(member={user_dn})(uniqueMember={user_dn}))",
     ) -> None:
         self._server_uri = server_uri
         self._user_dn_template = user_dn_template
+        self._bind_dn = bind_dn
+        self._bind_password = bind_password
+        self._user_filter = user_filter
         self._user_search_base = user_search_base
         self._group_role_map = group_role_map
         self._role_claim = role_claim
@@ -146,19 +164,28 @@ class LDAPAuthenticator:
         self._default_role = default_role or ops_role
         self._ca_cert_file = ca_cert_file
         self._verify_tls = verify_tls
+        self._starttls = starttls
         self._bind_timeout = bind_timeout
+        self._receive_timeout = receive_timeout
         self._cache_ttl = cache_ttl
+        self._group_search_base = group_search_base
+        self._group_filter = group_filter
         self._cache: dict[str, tuple[dict[str, Any], float]] = {}
+        # Per-process salt so a heap dump of the cache cannot be used for an
+        # offline dictionary attack against users' passwords.
+        self._cache_salt = secrets.token_bytes(16)
         self._server: Any | None = None
 
     @classmethod
     def from_settings(cls, settings: Settings) -> LDAPAuthenticator:
         assert settings.ldap_server_uri is not None
-        assert settings.ldap_user_dn_template is not None
         assert settings.ldap_user_search_base is not None
         return cls(
             server_uri=settings.ldap_server_uri,
             user_dn_template=settings.ldap_user_dn_template,
+            bind_dn=settings.ldap_bind_dn,
+            bind_password=settings.ldap_bind_password,
+            user_filter=settings.ldap_user_filter,
             user_search_base=settings.ldap_user_search_base,
             group_role_map=settings.ldap_group_role_map,
             role_claim=settings.role_claim,
@@ -169,8 +196,12 @@ class LDAPAuthenticator:
             default_role=settings.default_role,
             ca_cert_file=settings.ldap_ca_cert_file,
             verify_tls=settings.ldap_verify_tls,
+            starttls=settings.ldap_starttls,
             bind_timeout=settings.ldap_bind_timeout,
+            receive_timeout=settings.ldap_receive_timeout,
             cache_ttl=settings.ldap_cache_ttl,
+            group_search_base=settings.ldap_group_search_base,
+            group_filter=settings.ldap_group_filter,
         )
 
     # ── Internal helpers ──────────────────────────────────────────────────
@@ -183,7 +214,7 @@ class LDAPAuthenticator:
 
             tls: Any = None
             use_ssl = self._server_uri.lower().startswith("ldaps://")
-            if use_ssl or self._verify_tls:
+            if use_ssl or self._starttls or self._verify_tls:
                 tls = Tls(
                     ca_certs_file=self._ca_cert_file,
                     validate=ssl.CERT_REQUIRED if self._verify_tls else ssl.CERT_NONE,
@@ -196,8 +227,23 @@ class LDAPAuthenticator:
             )
         return self._server
 
+    def _connect(self, user: str, password: str) -> Any:
+        """Open a bound, read-only connection (StartTLS first when configured)."""
+        from ldap3 import AUTO_BIND_NO_TLS, AUTO_BIND_TLS_BEFORE_BIND, Connection
+
+        return Connection(
+            self._get_server(),
+            user=user,
+            password=password,
+            auto_bind=AUTO_BIND_TLS_BEFORE_BIND if self._starttls else AUTO_BIND_NO_TLS,
+            read_only=True,
+            raise_exceptions=True,
+            receive_timeout=self._receive_timeout,
+        )
+
     def _cache_key(self, username: str, password: str) -> str:
-        return hashlib.sha256(f"{username}:{password}".encode()).hexdigest()
+        material = self._cache_salt + username.encode() + b"\x00" + password.encode()
+        return hashlib.sha256(material).hexdigest()
 
     def _check_cache(self, key: str) -> dict[str, Any] | None:
         entry = self._cache.get(key)
@@ -212,50 +258,42 @@ class LDAPAuthenticator:
     def _set_cache(self, key: str, claims: dict[str, Any]) -> None:
         self._cache[key] = (claims, time.time() + self._cache_ttl)
 
-    def _sync_bind_and_get_groups(self, username: str, password: str) -> list[str] | None:
-        """Blocking: direct-bind and read memberOf. Returns None on auth failure."""
-        from ldap3 import Connection
-        from ldap3.core.exceptions import LDAPException
+    @staticmethod
+    def _member_of(entry: Any) -> list[str]:
+        raw = entry.memberOf.values if hasattr(entry, "memberOf") and entry.memberOf else []
+        return [str(g) for g in raw]
 
+    def _sync_direct_bind(self, username: str, password: str) -> list[str] | None:
+        """Blocking: direct-bind and read memberOf. Returns None on auth failure."""
+        from ldap3.core.exceptions import LDAPException
+        from ldap3.utils.conv import escape_filter_chars
+
+        assert self._user_dn_template is not None
         bind_dn = self._user_dn_template.replace("{username}", username)
-        server = self._get_server()
 
         try:
-            conn = Connection(
-                server,
-                user=bind_dn,
-                password=password,
-                auto_bind=True,
-                read_only=True,
-                raise_exceptions=True,
-            )
+            conn = self._connect(bind_dn, password)
         except LDAPException as exc:
             logger.debug("LDAP bind failed for '%s': %s", username, exc)
             return None
 
         try:
             # Search supports AD UPN/sAMAccountName, generic uid=, and full DN.
+            # Values are escaped so a crafted username can't alter the filter.
+            safe_username = escape_filter_chars(username)
+            safe_dn = escape_filter_chars(bind_dn)
             search_filter = (
-                f"(|(userPrincipalName={username})"
-                f"(sAMAccountName={username})"
-                f"(uid={username})"
-                f"(distinguishedName={bind_dn}))"
+                f"(|(userPrincipalName={safe_username})"
+                f"(sAMAccountName={safe_username})"
+                f"(uid={safe_username})"
+                f"(distinguishedName={safe_dn}))"
             )
             conn.search(
                 search_base=self._user_search_base,
                 search_filter=search_filter,
                 attributes=["memberOf"],
             )
-            groups: list[str] = []
-            if conn.entries:
-                entry = conn.entries[0]
-                raw = (
-                    entry.memberOf.values
-                    if hasattr(entry, "memberOf") and entry.memberOf
-                    else []
-                )
-                groups = [str(g) for g in raw]
-            return groups
+            return self._member_of(conn.entries[0]) if conn.entries else []
         except LDAPException as exc:
             logger.warning("LDAP group search failed for '%s': %s", username, exc)
             return []
@@ -264,6 +302,85 @@ class LDAPAuthenticator:
                 conn.unbind()
             except Exception:
                 pass
+
+    def _sync_search_then_bind(self, username: str, password: str) -> list[str] | None:
+        """Blocking: service-account search for the user's DN, then bind as it.
+
+        Returns the user's groups on success, or ``None`` when the user is not
+        found, matches more than one entry (ambiguity is a deny), or the
+        password bind fails — indistinguishable outcomes for the client.
+        """
+        from ldap3 import SUBTREE
+        from ldap3.core.exceptions import LDAPException
+        from ldap3.utils.conv import escape_filter_chars
+
+        assert self._bind_dn is not None
+
+        try:
+            service_conn = self._connect(self._bind_dn, self._bind_password or "")
+        except LDAPException as exc:
+            logger.error("LDAP service-account bind failed: %s", exc)
+            return None
+
+        try:
+            safe_username = escape_filter_chars(username)
+            service_conn.search(
+                search_base=self._user_search_base,
+                search_filter=self._user_filter.replace("{username}", safe_username),
+                search_scope=SUBTREE,
+                attributes=["memberOf"],
+            )
+            if not service_conn.entries:
+                logger.debug("LDAP user '%s' not found", username)
+                return None
+            if len(service_conn.entries) > 1:
+                logger.warning(
+                    "LDAP search for '%s' matched %d entries; denying ambiguous login",
+                    username,
+                    len(service_conn.entries),
+                )
+                return None
+            entry = service_conn.entries[0]
+            user_dn = str(entry.entry_dn)
+            groups = self._member_of(entry)
+
+            if self._group_search_base:
+                # Directories without memberOf (plain OpenLDAP): find groups
+                # that list the user's DN as a member.
+                safe_dn = escape_filter_chars(user_dn)
+                service_conn.search(
+                    search_base=self._group_search_base,
+                    search_filter=self._group_filter.replace("{user_dn}", safe_dn),
+                    search_scope=SUBTREE,
+                    attributes=["cn"],
+                )
+                groups = [str(g.entry_dn) for g in service_conn.entries]
+        except LDAPException as exc:
+            logger.warning("LDAP search failed for '%s': %s", username, exc)
+            return None
+        finally:
+            try:
+                service_conn.unbind()
+            except Exception:
+                pass
+
+        # Second bind as the found DN verifies the user's password.
+        try:
+            user_conn = self._connect(user_dn, password)
+        except LDAPException as exc:
+            logger.debug("LDAP password bind failed for '%s' (%s): %s", username, user_dn, exc)
+            return None
+        try:
+            user_conn.unbind()
+        except Exception:
+            pass
+        return groups
+
+    def _sync_bind_and_get_groups(self, username: str, password: str) -> list[str] | None:
+        """Blocking: authenticate via the configured bind mode, return groups."""
+        if self._bind_dn is not None:
+            return self._sync_search_then_bind(username, password)
+        return self._sync_direct_bind(username, password)
 
     def _claims_for_groups(self, groups: list[str]) -> dict[str, Any] | None:
         if not self._group_role_map:
@@ -352,26 +469,66 @@ class BasicLDAPAuthBackend(AuthenticationBackend):
             scopes=[],
             expires_at=int(time.time()) + self._authenticator._cache_ttl,
             claims=claims,
+            auth_method="ldap",
         )
         return AuthCredentials([]), AuthenticatedUser(access_token)
 
 
-# ── Scope-gate middleware (LDAP mode) ─────────────────────────────────────────
+# ── Composite backend (oauth + ldap) ──────────────────────────────────────────
 
 
-class BasicRequireAuthMiddleware:
-    """ASGI gate for LDAP mode.
+class CompositeAuthBackend(AuthenticationBackend):
+    """Dispatch on the Authorization scheme: Bearer → OAuth, Basic → LDAP.
 
-    Mirrors ``RequireAuthMiddleware`` but emits ``WWW-Authenticate: Basic`` on
-    401 (the correct challenge for HTTP Basic clients). Instance-level
-    authorization is enforced downstream by :mod:`ariaops_mcp.principal` using
-    the claims the LDAP backend attached, so this gate only requires that the
-    request is authenticated.
+    Used by ``ARIAOPS_HTTP_AUTH_MODE=both``. An unknown or missing scheme
+    returns ``None`` so the request stays unauthenticated and the gate 401s
+    with both challenges.
     """
 
-    def __init__(self, app: ASGIApp, required_scopes: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        bearer: AuthenticationBackend | None,
+        basic: BasicLDAPAuthBackend | None,
+    ) -> None:
+        self._bearer = bearer
+        self._basic = basic
+
+    async def authenticate(
+        self, conn: HTTPConnection
+    ) -> tuple[AuthCredentials, BaseUser] | None:
+        scheme = conn.headers.get("Authorization", "").split(" ", 1)[0].lower()
+        if scheme == "bearer" and self._bearer is not None:
+            return await self._bearer.authenticate(conn)
+        if scheme == "basic" and self._basic is not None:
+            return await self._basic.authenticate(conn)
+        return None
+
+
+# ── Auth-gate middleware ──────────────────────────────────────────────────────
+
+BASIC_CHALLENGE = 'Basic realm="ariaops-mcp"'
+
+
+class RequireAnyAuthMiddleware:
+    """ASGI gate accepting any of the configured authentication methods.
+
+    Mirrors the SDK's ``RequireAuthMiddleware`` but emits one
+    ``WWW-Authenticate`` header per configured challenge on 401 (RFC 7235),
+    e.g. both ``Bearer`` and ``Basic`` in dual-auth mode. ``required_scopes``
+    is an OAuth concept and is only enforced on tokens whose ``auth_method``
+    is ``"oauth"`` — LDAP users carry no scopes and are authorized
+    per-instance downstream by :mod:`ariaops_mcp.principal`.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        required_scopes: list[str] | None = None,
+        challenges: list[str] | None = None,
+    ) -> None:
         self._app = app
         self._required_scopes = required_scopes or []
+        self._challenges = challenges or [BASIC_CHALLENGE]
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in ("http", "websocket"):
@@ -385,20 +542,22 @@ class BasicRequireAuthMiddleware:
                 status_code=401,
                 error="unauthorized",
                 description="Authentication required",
-                www_authenticate='Basic realm="ariaops-mcp"',
+                www_authenticate=self._challenges,
             )
             return
 
-        auth_credentials = scope.get("auth")
-        for required in self._required_scopes:
-            if auth_credentials is None or required not in auth_credentials.scopes:
-                await self._send_error(
-                    send,
-                    status_code=403,
-                    error="insufficient_scope",
-                    description=f"Required scope: {required}",
-                )
-                return
+        auth_method = getattr(auth_user.access_token, "auth_method", "oauth")
+        if auth_method != "ldap":
+            auth_credentials = scope.get("auth")
+            for required in self._required_scopes:
+                if auth_credentials is None or required not in auth_credentials.scopes:
+                    await self._send_error(
+                        send,
+                        status_code=403,
+                        error="insufficient_scope",
+                        description=f"Required scope: {required}",
+                    )
+                    return
 
         await self._app(scope, receive, send)
 
@@ -408,15 +567,19 @@ class BasicRequireAuthMiddleware:
         status_code: int,
         error: str,
         description: str,
-        www_authenticate: str | None = None,
+        www_authenticate: list[str] | None = None,
     ) -> None:
         body = json.dumps({"error": error, "error_description": description}).encode()
         headers: list[tuple[bytes, bytes]] = [
             (b"content-type", b"application/json"),
             (b"content-length", str(len(body)).encode()),
         ]
-        if www_authenticate:
-            headers.append((b"www-authenticate", www_authenticate.encode()))
+        for challenge in www_authenticate or []:
+            headers.append((b"www-authenticate", challenge.encode()))
 
         await send({"type": "http.response.start", "status": status_code, "headers": headers})
         await send({"type": "http.response.body", "body": body})
+
+
+# Backward-compatible alias (pre-dual-auth name).
+BasicRequireAuthMiddleware = RequireAnyAuthMiddleware

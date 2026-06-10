@@ -17,6 +17,7 @@ from ariaops_mcp.client import reset_current_instance, set_current_instance
 from ariaops_mcp.config import get_settings
 from ariaops_mcp.logging_config import new_correlation_id
 from ariaops_mcp.principal import AccessDenied, Principal, resolve_principal
+from ariaops_mcp.skills.access import skill_allowed, visible_skills
 from ariaops_mcp.skills.executor import execute_skill as _run_skill_orchestration
 from ariaops_mcp.skills.prompts import render_prompt, skill_to_prompt
 from ariaops_mcp.skills.registry import get_registry
@@ -166,8 +167,7 @@ def _format_skill_error(error: str, cid: str, **extra: Any) -> str:
 
 
 async def _handle_list_skills(_args: dict[str, Any], _cid: str) -> str:
-    registry = get_registry()
-    skills = registry.list()
+    skills = visible_skills(_principal_or_none())
     result = [
         {
             "name": s.name,
@@ -191,10 +191,15 @@ async def _handle_execute_skill(args: dict[str, Any], cid: str) -> str:
     arguments: dict[str, Any] = raw_arguments or {}
     registry = get_registry()
     skill = registry.get(name)
+    principal = _principal_or_none()
 
-    if skill is None:
+    # A skill the caller may not access reports the same error as a missing
+    # one so restricted skill names can't be enumerated.
+    if skill is None or not skill_allowed(skill, principal):
         return _format_skill_error(
-            f"Skill not found: {name}", cid, available=[s.name for s in registry.list()]
+            f"Skill not found: {name}",
+            cid,
+            available=[s.name for s in visible_skills(principal)],
         )
     if not skill.orchestration:
         return _format_skill_error(f"Skill '{name}' does not support orchestration", cid, orchestration=False)
@@ -263,6 +268,19 @@ def _current_claims() -> dict[str, Any] | None:
 
 def _resolve_principal_for_request() -> Principal:
     return resolve_principal(claims=_current_claims())
+
+
+def _principal_or_none() -> Principal | None:
+    """Principal for the current request, or None when resolution fails.
+
+    Used by skill listing/filtering paths that must not raise (MCP
+    list_resources/list_prompts) — a failed resolution fails closed, showing
+    only unrestricted skills.
+    """
+    try:
+        return _resolve_principal_for_request()
+    except AccessDenied:
+        return None
 
 
 async def _handle_list_instances(_args: dict[str, Any], cid: str) -> str:
@@ -419,8 +437,7 @@ def create_server() -> Server:
             ),
         ]
 
-        registry = get_registry()
-        for skill in registry.list():
+        for skill in visible_skills(_principal_or_none()):
             resource_list.append(
                 types.Resource(
                     uri=cast(AnyUrl, f"ariaops://skills/{skill.name}"),
@@ -454,7 +471,8 @@ def create_server() -> Server:
             skill_name = uri_str[len("ariaops://skills/"):]
             registry = get_registry()
             skill = registry.get(skill_name)
-            if skill is None:
+            # Same error for missing and restricted skills (anti-enumeration).
+            if skill is None or not skill_allowed(skill, _principal_or_none()):
                 raise ValueError(f"Skill not found: {skill_name}")
             return skill.body
         else:
@@ -462,14 +480,14 @@ def create_server() -> Server:
 
     @server.list_prompts()
     async def handle_list_prompts() -> list[types.Prompt]:
-        registry = get_registry()
-        return [skill_to_prompt(s) for s in registry.list()]
+        return [skill_to_prompt(s) for s in visible_skills(_principal_or_none())]
 
     @server.get_prompt()
     async def handle_get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
         registry = get_registry()
         skill = registry.get(name)
-        if skill is None:
+        # Same error for missing and restricted skills (anti-enumeration).
+        if skill is None or not skill_allowed(skill, _principal_or_none()):
             raise ValueError(f"Skill not found: {name}")
         return render_prompt(skill, arguments)
 
