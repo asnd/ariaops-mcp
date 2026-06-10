@@ -355,6 +355,19 @@ cd test-ui
 pytest tests
 ```
 
+### Chainlit auth test harness
+
+`test-ui/chainlit/` is a minimal [Chainlit](https://docs.chainlit.io) frontend that tests both auth modes end-to-end. It proves the LDAP (Basic) and OAuth (Bearer) wiring without coupling the demo UI to Gradio.
+
+```bash
+cp test-ui/chainlit/.env.example test-ui/chainlit/.env
+# edit .env: set ARIAOPS_MCP_URL + optional LITELLM_* vars
+pip install chainlit httpx python-dotenv
+chainlit run test-ui/chainlit/app.py -w
+```
+
+See [`CHAINLIT_AUTH.md`](CHAINLIT_AUTH.md) for full configuration details.
+
 ## Development
 
 ```bash
