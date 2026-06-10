@@ -10,3 +10,5 @@ build/
 .pyright/
 *.log
 *.bak
+.chainlit/
+.files/

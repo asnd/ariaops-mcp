@@ -1,12 +1,15 @@
 """Configuration loaded from environment variables."""
 
 import json
+import logging
 from contextvars import ContextVar, Token
 from functools import lru_cache
 from typing import Annotated, Any, Literal
 
 from pydantic import AnyHttpUrl, BaseModel, Field, TypeAdapter, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
+
+logger = logging.getLogger(__name__)
 
 # Identifier used for the implicit single instance synthesized from the legacy
 # ARIAOPS_HOST/USERNAME/PASSWORD variables when ARIAOPS_INSTANCES is not set.
@@ -166,7 +169,10 @@ class Settings(BaseSettings):
             stripped = value.strip()
             if not stripped:
                 return {}
-            parsed = json.loads(stripped)
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"ARIAOPS_LDAP_GROUP_ROLE_MAP must be valid JSON: {exc}") from exc
             if not isinstance(parsed, dict):
                 raise ValueError("ARIAOPS_LDAP_GROUP_ROLE_MAP must be a JSON object")
             return {str(k): {str(ik): str(iv) for ik, iv in v.items()} for k, v in parsed.items()}
@@ -299,7 +305,10 @@ class Settings(BaseSettings):
         if not self.http_oauth_enabled and self.http_auth_mode != "oauth":
             return self
         if self.transport != "http":
-            raise ValueError("ARIAOPS_HTTP_OAUTH_ENABLED requires ARIAOPS_TRANSPORT=http")
+            raise ValueError(
+                "HTTP OAuth (ARIAOPS_HTTP_OAUTH_ENABLED=true or "
+                "ARIAOPS_HTTP_AUTH_MODE=oauth) requires ARIAOPS_TRANSPORT=http"
+            )
 
         required_fields = {
             "ARIAOPS_HTTP_OAUTH_ISSUER_URL": self.http_oauth_issuer_url,
@@ -391,6 +400,11 @@ class Settings(BaseSettings):
             raise ValueError("ARIAOPS_LDAP_CACHE_TTL must be >= 0")
         if self.ldap_bind_timeout <= 0:
             raise ValueError("ARIAOPS_LDAP_BIND_TIMEOUT must be > 0")
+        if self.http_oauth_required_scopes:
+            logger.warning(
+                "ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES is set but ignored in LDAP mode: "
+                "LDAP-authenticated requests carry no OAuth scopes."
+            )
         return self
 
     @property

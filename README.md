@@ -175,6 +175,19 @@ python -m ariaops_mcp
 `/health` stays unauthenticated, and instance authorization is enforced by the
 same `principal` layer as OAuth — LDAP only decides the caller's role/instance.
 
+Security notes:
+
+- Group lookup reads `memberOf`, which contains **direct** group memberships
+  only — a user who is in a mapped group via a nested group will not receive
+  its role. Map the groups users belong to directly (resolving nested
+  membership via the AD matching-rule-in-chain OID `1.2.840.113556.1.4.1941`
+  is a possible future extension).
+- Failed binds are never cached, so every bad-password request reaches the
+  directory. Put a rate limit on the MCP endpoint at your reverse proxy to
+  protect against password spraying and AD account-lockout abuse.
+- `ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES` is ignored in LDAP mode (Basic-auth
+  requests carry no OAuth scopes); a warning is logged if it is set.
+
 ### Run with Podman
 
 ```bash

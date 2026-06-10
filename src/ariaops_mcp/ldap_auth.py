@@ -16,8 +16,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import hmac
 import json
 import logging
+import secrets
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +34,9 @@ if TYPE_CHECKING:
     from ariaops_mcp.config import Settings
 
 logger = logging.getLogger(__name__)
+
+# Successful-bind claims cache entries are swept once the cache grows past this.
+_CACHE_MAX_ENTRIES = 1000
 
 
 # ── Group → claims mapping ────────────────────────────────────────────────────
@@ -149,7 +154,14 @@ class LDAPAuthenticator:
         self._bind_timeout = bind_timeout
         self._cache_ttl = cache_ttl
         self._cache: dict[str, tuple[dict[str, Any], float]] = {}
+        # Keys credentials with HMAC under a per-process random key so a memory
+        # dump of the cache does not allow an offline dictionary attack.
+        self._cache_hmac_key = secrets.token_bytes(32)
         self._server: Any | None = None
+
+    @property
+    def cache_ttl(self) -> int:
+        return self._cache_ttl
 
     @classmethod
     def from_settings(cls, settings: Settings) -> LDAPAuthenticator:
@@ -197,7 +209,9 @@ class LDAPAuthenticator:
         return self._server
 
     def _cache_key(self, username: str, password: str) -> str:
-        return hashlib.sha256(f"{username}:{password}".encode()).hexdigest()
+        return hmac.new(
+            self._cache_hmac_key, f"{username}:{password}".encode(), hashlib.sha256
+        ).hexdigest()
 
     def _check_cache(self, key: str) -> dict[str, Any] | None:
         entry = self._cache.get(key)
@@ -210,12 +224,20 @@ class LDAPAuthenticator:
         return claims
 
     def _set_cache(self, key: str, claims: dict[str, Any]) -> None:
+        if len(self._cache) >= _CACHE_MAX_ENTRIES:
+            now = time.time()
+            self._cache = {k: v for k, v in self._cache.items() if v[1] > now}
+            while len(self._cache) >= _CACHE_MAX_ENTRIES:
+                # Still full of live entries: evict the soonest-expiring one.
+                soonest = min(self._cache, key=lambda k: self._cache[k][1])
+                del self._cache[soonest]
         self._cache[key] = (claims, time.time() + self._cache_ttl)
 
     def _sync_bind_and_get_groups(self, username: str, password: str) -> list[str] | None:
         """Blocking: direct-bind and read memberOf. Returns None on auth failure."""
         from ldap3 import Connection
         from ldap3.core.exceptions import LDAPException
+        from ldap3.utils.conv import escape_filter_chars
 
         bind_dn = self._user_dn_template.replace("{username}", username)
         server = self._get_server()
@@ -235,11 +257,15 @@ class LDAPAuthenticator:
 
         try:
             # Search supports AD UPN/sAMAccountName, generic uid=, and full DN.
+            # Escape filter metacharacters so a crafted username cannot widen
+            # the filter and match a different user's entry (and groups).
+            safe_user = escape_filter_chars(username)
+            safe_dn = escape_filter_chars(bind_dn)
             search_filter = (
-                f"(|(userPrincipalName={username})"
-                f"(sAMAccountName={username})"
-                f"(uid={username})"
-                f"(distinguishedName={bind_dn}))"
+                f"(|(userPrincipalName={safe_user})"
+                f"(sAMAccountName={safe_user})"
+                f"(uid={safe_user})"
+                f"(distinguishedName={safe_dn}))"
             )
             conn.search(
                 search_base=self._user_search_base,
@@ -350,7 +376,7 @@ class BasicLDAPAuthBackend(AuthenticationBackend):
             token="ldap",
             client_id=username,
             scopes=[],
-            expires_at=int(time.time()) + self._authenticator._cache_ttl,
+            expires_at=int(time.time()) + self._authenticator.cache_ttl,
             claims=claims,
         )
         return AuthCredentials([]), AuthenticatedUser(access_token)
