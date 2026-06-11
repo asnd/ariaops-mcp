@@ -1,0 +1,77 @@
+{
+  "realm": "ariaops",
+  "enabled": true,
+  "accessTokenLifespan": 3600,
+  "sslRequired": "none",
+  "clients": [
+    {
+      "clientId": "ariaops-client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "ariaops-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "ariaops-mcp",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "ariaops-role",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "ariaops_role",
+            "claim.name": "ariaops_role",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "ariaops-country",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "ariaops_country",
+            "claim.name": "ariaops_country",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@example.com",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Ops",
+      "credentials": [{ "type": "password", "value": "alicepw", "temporary": false }],
+      "attributes": { "ariaops_role": ["ops"] }
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@example.com",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Sweden",
+      "credentials": [{ "type": "password", "value": "bobpw", "temporary": false }],
+      "attributes": { "ariaops_role": ["country"], "ariaops_country": ["SE"] }
+    }
+  ]
+}

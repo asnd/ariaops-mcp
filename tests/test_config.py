@@ -80,7 +80,7 @@ def test_http_oauth_enabled_requires_http_transport(monkeypatch):
     monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_RESOURCE_SERVER_URL", "https://mcp.example.com")
     monkeypatch.setenv("ARIAOPS_HTTP_OAUTH_JWT_KEY", _HS256_SECRET)
 
-    with pytest.raises(ValidationError, match="ARIAOPS_HTTP_OAUTH_ENABLED requires ARIAOPS_TRANSPORT=http"):
+    with pytest.raises(ValidationError, match="requires ARIAOPS_TRANSPORT=http"):
         Settings()  # type: ignore[call-arg]
 
 

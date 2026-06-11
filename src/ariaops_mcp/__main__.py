@@ -112,10 +112,10 @@ def create_http_app(
             Middleware(AuthenticationMiddleware, backend=BasicLDAPAuthBackend(authenticator)),
             Middleware(AuthContextMiddleware),
         ]
-        mcp_endpoint = BasicRequireAuthMiddleware(
-            streamable_http_app,
-            s.http_oauth_required_scopes,
-        )
+        # OAuth scope requirements do not apply here: the LDAP backend issues
+        # tokens without scopes, so passing http_oauth_required_scopes would
+        # 403 every request. Authorization is enforced by principal claims.
+        mcp_endpoint = BasicRequireAuthMiddleware(streamable_http_app)
 
     routes.append(Route("/", endpoint=mcp_endpoint))
 

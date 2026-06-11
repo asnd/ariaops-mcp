@@ -265,6 +265,73 @@ async def test_authenticator_cache_expiry():
     assert call_count == 2
 
 
+def test_cache_key_is_keyed_per_authenticator():
+    # HMAC under a per-process random key: identical credentials must not hash
+    # to a value an attacker could precompute offline.
+    auth_a = _make_authenticator()
+    auth_b = _make_authenticator()
+    assert auth_a._cache_key("alice", "secret") == auth_a._cache_key("alice", "secret")
+    assert auth_a._cache_key("alice", "secret") != auth_b._cache_key("alice", "secret")
+
+
+def test_set_cache_sweeps_expired_and_caps_size(monkeypatch):
+    import ariaops_mcp.ldap_auth as ldap_auth_mod
+
+    monkeypatch.setattr(ldap_auth_mod, "_CACHE_MAX_ENTRIES", 3)
+    auth = _make_authenticator(cache_ttl=300)
+
+    auth._cache["expired-1"] = ({ROLE_CLAIM: "ops"}, time.time() - 10)
+    auth._cache["expired-2"] = ({ROLE_CLAIM: "ops"}, time.time() - 10)
+    auth._set_cache("live-1", {ROLE_CLAIM: "ops"})
+    auth._set_cache("live-2", {ROLE_CLAIM: "ops"})
+    auth._set_cache("live-3", {ROLE_CLAIM: "ops"})
+    # The cap triggered a sweep: expired entries are gone, live ones kept.
+    assert "expired-1" not in auth._cache
+    assert "expired-2" not in auth._cache
+    # A further insert at the cap evicts the soonest-expiring live entry.
+    auth._set_cache("live-4", {ROLE_CLAIM: "ops"})
+    assert len(auth._cache) <= 3
+    assert "live-4" in auth._cache
+
+
+def test_sync_bind_escapes_filter_metacharacters():
+    """A username with LDAP filter metacharacters must not widen the search."""
+    captured: dict[str, str] = {}
+
+    class _FakeConn:
+        entries: list[Any] = []
+
+        def search(self, search_base: str, search_filter: str, attributes: list[str]) -> None:
+            captured["filter"] = search_filter
+
+        def unbind(self) -> None:
+            pass
+
+    auth = LDAPAuthenticator(
+        server_uri="ldaps://dc.corp.example.com:636",
+        user_dn_template="{username}@corp.example.com",
+        user_search_base="dc=corp,dc=example,dc=com",
+        group_role_map={},
+        role_claim=ROLE_CLAIM,
+        country_claim=COUNTRY_CLAIM,
+        instance_claim=INSTANCE_CLAIM,
+        ops_role="ops",
+        country_role="country",
+        verify_tls=False,
+    )
+
+    with (
+        patch.object(LDAPAuthenticator, "_get_server", return_value=object()),
+        patch("ldap3.Connection", return_value=_FakeConn()),
+    ):
+        groups = auth._sync_bind_and_get_groups("evil*)(sAMAccountName=admin", "pw")
+
+    assert groups == []
+    sent = captured["filter"]
+    assert "*)(" not in sent  # raw metacharacters never reach the directory
+    assert r"evil\2a\29\28sAMAccountName=admin" in sent
+
+
 # ── LDAP → principal contract ─────────────────────────────────────────────────
 
 
@@ -466,6 +533,24 @@ def test_ldap_app_valid_credentials_allows_request():
     assert response.status_code == 200
 
 
+def test_ldap_app_ignores_oauth_required_scopes():
+    """Leftover ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES must not 403 LDAP requests."""
+    settings = _build_ldap_settings(ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES="mcp:read,mcp:write")
+
+    def _fake_bind(self: Any, username: str, password: str) -> list[str]:
+        return ["CN=vrops-ops,DC=corp,DC=com"]
+
+    with patch.object(LDAPAuthenticator, "_sync_bind_and_get_groups", _fake_bind):
+        app = create_http_app(server=object(), settings=settings, session_manager=_FakeSessionManager())
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/",
+                headers={"Authorization": _basic_header("alice", "secret")},
+                json={"jsonrpc": "2.0"},
+            )
+    assert response.status_code == 200
+
+
 def test_ldap_app_wrong_credentials_returns_401():
     settings = _build_ldap_settings()
 
@@ -583,6 +668,13 @@ def test_config_effective_auth_mode_backward_compat():
         }
     )
     assert settings.effective_auth_mode == "oauth"
+
+
+def test_config_group_map_invalid_json_friendly_error():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="must be valid JSON"):
+        _build_ldap_settings(ARIAOPS_LDAP_GROUP_ROLE_MAP="{not json")
 
 
 def test_config_ldap_happy_path_and_group_map_parsing():

@@ -175,6 +175,21 @@ python -m ariaops_mcp
 `/health` stays unauthenticated, and instance authorization is enforced by the
 same `principal` layer as OAuth — LDAP only decides the caller's role/instance.
 
+Security notes:
+
+- Group lookup reads `memberOf`, which contains **direct** group memberships
+  only — a user who is in a mapped group via a nested group will not receive
+  its role. Map the groups users belong to directly (resolving nested
+  membership via the AD matching-rule-in-chain OID `1.2.840.113556.1.4.1941`
+  is a possible future extension).
+- Failed binds are never cached, so every bad-password request reaches the
+  directory. Put a rate limit on the MCP endpoint at your reverse proxy to
+  protect against password spraying and AD account-lockout abuse.
+- `ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES` is ignored in LDAP mode (Basic-auth
+  requests carry no OAuth scopes); a warning is logged if it is set.
+
+See [`AUTH_FLOW.md`](AUTH_FLOW.md) for a detailed message-flow walkthrough of both OAuth and LDAP modes, including middleware stack, token verification steps, cache behaviour, and principal resolution.
+
 ### Run with Podman
 
 ```bash
@@ -341,6 +356,30 @@ To run its automated tests:
 cd test-ui
 pytest tests
 ```
+
+### Chainlit auth test harness
+
+`test-ui/chainlit/` is a minimal [Chainlit](https://docs.chainlit.io) frontend that tests both auth modes end-to-end. It proves the LDAP (Basic) and OAuth (Bearer) wiring without coupling the demo UI to Gradio.
+
+```bash
+cp test-ui/chainlit/.env.example test-ui/chainlit/.env
+# edit .env: set ARIAOPS_MCP_URL + optional LITELLM_* vars
+pip install chainlit httpx python-dotenv
+chainlit run test-ui/chainlit/app.py -w
+```
+
+See [`CHAINLIT_AUTH.md`](CHAINLIT_AUTH.md) for full configuration details.
+
+### OAuth2 end-to-end scenario
+
+`test-e2e/oauth/` contains a self-contained Podman scenario that spins up a real Keycloak IdP with two simulated users (`alice`=ops, `bob`=country/SE) and verifies token validation, role-based instance access, and instance enforcement over the streamable HTTP transport.
+
+```bash
+./test-e2e/oauth/run.sh        # build image, start stack, run 8 tests, leave running
+./test-e2e/oauth/run.sh down   # tear down
+```
+
+See [`test-e2e/oauth/README.md`](test-e2e/oauth/README.md) for topology, user table, and proxy notes.
 
 ## Development
 

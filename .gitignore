@@ -1,4 +1,5 @@
 .env
+.env.test
 .venv/
 __pycache__/
 *.py[cod]
@@ -10,3 +11,5 @@ build/
 .pyright/
 *.log
 *.bak
+.chainlit/
+.files/

@@ -297,6 +297,48 @@ async def test_get_capacity_overview_multi_page(handlers):
 
 
 @pytest.mark.asyncio
+async def test_get_capacity_overview_chunks_stats_query(handlers):
+    """The latest-stats query is sent in PAGE_SIZE_MAX-sized id chunks and merged."""
+
+    def resources_side_effect(request: httpx.Request) -> httpx.Response:
+        page = int(request.url.params.get("page", 0))
+        page_size = int(request.url.params.get("pageSize", 50))
+        total = 250
+        start = page * page_size
+        end = min(start + page_size, total)
+        return httpx.Response(
+            200,
+            json={
+                "resourceList": [{"identifier": f"res-{i}"} for i in range(start, end)],
+                "pageInfo": {"totalCount": total, "page": page, "pageSize": page_size},
+            },
+        )
+
+    stats_bodies: list[dict] = []
+
+    def stats_side_effect(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        stats_bodies.append(body)
+        values = [{"resourceId": r["resourceId"]} for r in body["resourceId"]]
+        return httpx.Response(200, json={"values": values})
+
+    with respx.mock:
+        respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+        respx.get(f"{BASE}/resources").mock(side_effect=resources_side_effect)
+        respx.post(f"{BASE}/resources/stats/latest/query").mock(side_effect=stats_side_effect)
+
+        result = await handlers["get_capacity_overview"]({"resourceKind": "Datastore"})
+        data = json.loads(result)
+
+    assert len(stats_bodies) == 2
+    assert len(stats_bodies[0]["resourceId"]) == PAGE_SIZE_MAX
+    assert len(stats_bodies[1]["resourceId"]) == 250 - PAGE_SIZE_MAX
+    assert data["resourceCount"] == 250
+    # Chunked responses are merged back into a single values list.
+    assert len(data["capacityStats"]["values"]) == 250
+
+
+@pytest.mark.asyncio
 async def test_get_capacity_overview_single_page_exact_boundary(handlers):
     """When totalCount == pageSize, only one request is made (no unnecessary second fetch)."""
     page_calls: list[int] = []

@@ -181,17 +181,23 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             if not all_resource_ids:
                 return json.dumps({"message": "No resources found", "resourceKind": resource_kind})
 
-            body = {
-                "resourceId": [{"resourceId": rid} for rid in all_resource_ids],
-                "statKey": [{"key": k} for k in CAPACITY_STAT_KEYS],
-            }
-            stats_data = await client.post("/resources/stats/latest/query", body, idempotent=True)
+            # Query stats in chunks so large deployments don't produce one
+            # oversized POST body / response.
+            stats_values: list[Any] = []
+            for i in range(0, len(all_resource_ids), PAGE_SIZE_MAX):
+                chunk = all_resource_ids[i : i + PAGE_SIZE_MAX]
+                body = {
+                    "resourceId": [{"resourceId": rid} for rid in chunk],
+                    "statKey": [{"key": k} for k in CAPACITY_STAT_KEYS],
+                }
+                stats_data = await client.post("/resources/stats/latest/query", body, idempotent=True)
+                stats_values.extend(stats_data.get("values", []))
 
             return json.dumps(
                 {
                     "resourceKind": resource_kind,
                     "resourceCount": len(all_resource_ids),
-                    "capacityStats": stats_data,
+                    "capacityStats": {"values": stats_values},
                 },
                 indent=2,
             )
