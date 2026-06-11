@@ -188,6 +188,8 @@ Security notes:
 - `ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES` is ignored in LDAP mode (Basic-auth
   requests carry no OAuth scopes); a warning is logged if it is set.
 
+See [`AUTH_FLOW.md`](AUTH_FLOW.md) for a detailed message-flow walkthrough of both OAuth and LDAP modes, including middleware stack, token verification steps, cache behaviour, and principal resolution.
+
 ### Run with Podman
 
 ```bash
@@ -367,6 +369,17 @@ chainlit run test-ui/chainlit/app.py -w
 ```
 
 See [`CHAINLIT_AUTH.md`](CHAINLIT_AUTH.md) for full configuration details.
+
+### OAuth2 end-to-end scenario
+
+`test-e2e/oauth/` contains a self-contained Podman scenario that spins up a real Keycloak IdP with two simulated users (`alice`=ops, `bob`=country/SE) and verifies token validation, role-based instance access, and instance enforcement over the streamable HTTP transport.
+
+```bash
+./test-e2e/oauth/run.sh        # build image, start stack, run 8 tests, leave running
+./test-e2e/oauth/run.sh down   # tear down
+```
+
+See [`test-e2e/oauth/README.md`](test-e2e/oauth/README.md) for topology, user table, and proxy notes.
 
 ## Development
 
