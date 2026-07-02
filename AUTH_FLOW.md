@@ -178,9 +178,28 @@ dictionary attacks.
 
 **Group mapping rules:**
 - An `"ops"` descriptor always wins over any `"country"` descriptors.
+- A bare-CN map key (e.g. `"vrops-ops"`) matches any group with that CN
+  anywhere in the directory. A full-DN map key only matches that exact DN —
+  it is not also indexed by CN, so a full-DN key deliberately used to
+  disambiguate two same-named groups in different OUs cannot be bypassed by
+  membership in the wrong OU's group.
 - Only direct `memberOf` groups are checked; nested AD group membership
   (`LDAP_MATCHING_RULE_IN_CHAIN`) is not followed.
-- Failed binds are never cached so that password changes take effect immediately.
+- If `ARIAOPS_LDAP_GROUP_ROLE_MAP` is unset, every successfully-bound user is
+  granted `ARIAOPS_DEFAULT_ROLE` (no default — must be set explicitly for
+  LDAP mode; see the config validator). Set it deliberately: `ops` grants
+  access to every configured instance to anyone who can bind to the
+  directory.
+
+**Known limitations:**
+- Failed binds are never cached, so password changes are rejected
+  immediately. Successful binds *are* cached for `ldap_cache_ttl` seconds
+  (default 300s) keyed on the credential pair — after a password change, the
+  **old** password remains accepted from cache for up to that TTL, since the
+  cache has no way to invalidate by username alone. Lower `ARIAOPS_LDAP_CACHE_TTL`
+  if this window is unacceptable.
+- No bind-attempt rate limiting is implemented at the MCP server; brute-force
+  protection relies entirely on the directory's own account lockout policy.
 
 ---
 

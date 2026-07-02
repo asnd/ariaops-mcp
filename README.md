@@ -166,7 +166,7 @@ python -m ariaops_mcp
 | `ARIAOPS_LDAP_SERVER_URI` | yes | — | `ldaps://` URI. Plain `ldap://` only allowed with `ARIAOPS_LDAP_VERIFY_TLS=false`. |
 | `ARIAOPS_LDAP_USER_DN_TEMPLATE` | yes | — | Bind DN with `{username}`. AD UPN `{username}@corp.example.com` or `uid={username},ou=people,dc=corp,dc=com`. |
 | `ARIAOPS_LDAP_USER_SEARCH_BASE` | yes | — | Base DN for the `memberOf` lookup. |
-| `ARIAOPS_LDAP_GROUP_ROLE_MAP` | no | `{}` | JSON: AD group CN/DN → `{"role":"ops"}` or `{"role":"country","country":"SE"}`/`{"role":"country","instance":"de"}`. An `ops` group wins over `country`. When empty, every authenticated user gets `ARIAOPS_DEFAULT_ROLE`. A bound user matching no mapped group is denied. |
+| `ARIAOPS_LDAP_GROUP_ROLE_MAP` | no | `{}` | JSON: AD group CN/DN → `{"role":"ops"}` or `{"role":"country","country":"SE"}`/`{"role":"country","instance":"de"}`. An `ops` group wins over `country`. A bare-CN key matches any group with that CN anywhere in the directory; a full-DN key matches only that exact DN. When empty, `ARIAOPS_DEFAULT_ROLE` must be set explicitly (config fails closed otherwise) and every authenticated user gets that role. A bound user matching no mapped group is denied. |
 | `ARIAOPS_LDAP_CA_CERT_FILE` | no | system trust | PEM bundle for LDAPS verification. |
 | `ARIAOPS_LDAP_VERIFY_TLS` | no | `true` | Disable only for lab/testing. |
 | `ARIAOPS_LDAP_CACHE_TTL` | no | `300` | Seconds to cache a successful bind's claims. |

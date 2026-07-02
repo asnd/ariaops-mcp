@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 import jwt
 import pytest
+import respx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from starlette.testclient import TestClient
@@ -16,6 +19,7 @@ from ariaops_mcp.__main__ import create_http_app
 from ariaops_mcp.client import reset_client_override, set_client_override
 from ariaops_mcp.config import Settings
 from ariaops_mcp.http_auth import JWTTokenVerifier
+from tests.conftest import TOKEN_RESPONSE
 
 
 def _build_settings(**overrides: str | bool | list[str]) -> Settings:
@@ -571,3 +575,48 @@ def test_health_endpoint_returns_503_when_upstream_fails():
 
     assert response.status_code == 503
     assert response.json()["status"] == "degraded"
+
+
+def test_health_endpoint_probes_multiple_instances_concurrently(monkeypatch):
+    """One degraded instance must not block or hide a healthy sibling's result.
+
+    _health_check reads instances via get_settings(), which resolves through
+    the process-wide settings cache (not the `settings` object passed to
+    create_http_app) — so the multi-instance config must go through env vars,
+    matching the pattern used in tests/test_instances.py.
+    """
+    instances = json.dumps(
+        [
+            {"id": "us", "host": "us.vrops.local", "username": "u", "password": "p"},
+            {"id": "de", "host": "de.vrops.local", "username": "u", "password": "p"},
+        ]
+    )
+    monkeypatch.setenv("ARIAOPS_INSTANCES", instances)
+    from ariaops_mcp.config import clear_settings_cache
+
+    clear_settings_cache()
+    settings = _build_settings()
+    app = create_http_app(server=object(), settings=settings, session_manager=_FakeSessionManager())
+
+    with respx.mock:
+        respx.post("https://us.vrops.local/suite-api/api/auth/token/acquire").mock(
+            return_value=httpx.Response(200, json=TOKEN_RESPONSE)
+        )
+        respx.get("https://us.vrops.local/suite-api/api/versions/current").mock(
+            return_value=httpx.Response(200, json={"version": "8.6"})
+        )
+        # 401 is not in the client's retryable status set, so this fails fast
+        # instead of burning through the retry/backoff schedule.
+        respx.post("https://de.vrops.local/suite-api/api/auth/token/acquire").mock(
+            return_value=httpx.Response(401, json={"error": "unauthorized"})
+        )
+
+        with TestClient(app) as client:
+            response = client.get("/health")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "degraded"
+    by_id = {entry["id"]: entry for entry in body["instances"]}
+    assert by_id["us"]["status"] == "ok"
+    assert by_id["de"]["status"] == "degraded"

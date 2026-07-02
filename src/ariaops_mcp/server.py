@@ -33,6 +33,11 @@ _WRITE_TOOL_NAMES: set[str] = {t.name for t in write_ops.tool_definitions()}
 # Aria Operations instance.
 _INSTANCE_AGNOSTIC_TOOLS: set[str] = {"list_skills", "reload_skills", "list_instances"}
 
+# Instance-agnostic tools that mutate server state and are therefore
+# restricted to the "ops" role, even though they don't target a specific
+# Aria Operations instance.
+_OPS_ONLY_TOOLS: set[str] = {"reload_skills"}
+
 _INSTANCE_ARG_SCHEMA: dict[str, Any] = {
     "type": "string",
     "description": (
@@ -366,7 +371,24 @@ def create_server() -> Server:
 
         meta_handler = _META_TOOL_HANDLERS.get(name)
         if meta_handler is not None and name in _INSTANCE_AGNOSTIC_TOOLS:
-            # Server meta-tools that are not bound to a specific instance.
+            # Server meta-tools that are not bound to a specific instance, but
+            # still authenticated — and, for state-mutating ones, role-gated.
+            try:
+                principal = _resolve_principal_for_request()
+            except AccessDenied as e:
+                result = json.dumps({"error": "Access denied", "detail": str(e), "correlation_id": cid})
+                _log_done()
+                return [types.TextContent(type="text", text=result)]
+            if name in _OPS_ONLY_TOOLS and principal.role != "ops":
+                result = json.dumps(
+                    {
+                        "error": "Access denied",
+                        "detail": f"Tool '{name}' requires the '{get_settings().ops_role}' role",
+                        "correlation_id": cid,
+                    }
+                )
+                _log_done()
+                return [types.TextContent(type="text", text=result)]
             result = await _run(meta_handler(args, cid))
             _log_done()
             return [types.TextContent(type="text", text=result)]

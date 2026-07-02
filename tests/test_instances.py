@@ -158,6 +158,15 @@ def test_role_claim_as_list():
     assert p.role == "ops"
 
 
+def test_unmapped_list_role_claim_readable_error_message():
+    """An unrecognized list-valued role claim must render as a plain string,
+    not Python's list repr (e.g. "['contractor']")."""
+    s = Settings.model_validate({"ARIAOPS_INSTANCES": TWO_INSTANCES})
+    with pytest.raises(AccessDenied, match="Unknown role 'contractor'") as exc_info:
+        resolve_principal(claims={"ariaops_role": ["contractor"]}, settings=s)
+    assert "[" not in str(exc_info.value)
+
+
 def test_no_claims_uses_default_role():
     s = Settings.model_validate({"ARIAOPS_INSTANCES": TWO_INSTANCES, "ARIAOPS_DEFAULT_ROLE": "ops"})
     p = resolve_principal(claims=None, settings=s)
