@@ -152,6 +152,7 @@ These tools are disabled by default and must only be registered when `ARIAOPS_EN
 | `create_resource`            | `POST /api/resources`                                | Create a new resource |
 | `update_resource`            | `PUT /api/resources/{id}`                            | Update resource metadata |
 | `delete_resources`           | `DELETE /api/resources`                              | Delete one or more resources |
+| `export_ansible_inventory`   | Composite: `POST /api/resources/query` (+ optional file write) | Export YAML inventory for vSphere clusters, NSX-T edge nodes, and NSX-T managers |
 
 ---
 
@@ -227,6 +228,7 @@ ariaops_mcp/
 │       │   ├── metrics.py      # Metrics/stats tools
 │       │   ├── capacity.py     # Capacity tools (composite)
 │       │   ├── reports.py      # Report tools
+│       │   ├── ansible_inventory.py # Opt-in Ansible inventory export
 │       │   └── discovery.py    # Version, collectors, symptoms, etc.
 │       ├── models.py           # Pydantic models for params/responses
 │       └── config.py           # Settings from env vars
