@@ -62,6 +62,23 @@ def _sanitize_hostname(value: str) -> str:
     return hostname or "resource"
 
 
+def _unique_hostname(base_hostname: str, identifier: str, seen_hostnames: set[str]) -> str:
+    if base_hostname not in seen_hostnames:
+        return base_hostname
+
+    if identifier:
+        candidate = f"{base_hostname}_{identifier[:8]}"
+        if candidate not in seen_hostnames:
+            return candidate
+
+    suffix = 2
+    while True:
+        candidate = f"{base_hostname}_{suffix}"
+        if candidate not in seen_hostnames:
+            return candidate
+        suffix += 1
+
+
 def _resource_name(resource: dict[str, Any]) -> str:
     resource_key = resource.get("resourceKey")
     if isinstance(resource_key, dict):
@@ -197,11 +214,8 @@ async def _build_inventory() -> dict[str, Any]:
 
         for resource in resources:
             base_hostname = _sanitize_hostname(_resource_name(resource))
-            hostname = base_hostname
             identifier = str(resource.get("identifier", ""))
-            if hostname in seen_hostnames:
-                suffix = identifier[:8] if identifier else str(len(seen_hostnames) + 1)
-                hostname = f"{base_hostname}_{suffix}"
+            hostname = _unique_hostname(base_hostname, identifier, seen_hostnames)
             seen_hostnames.add(hostname)
 
             group_hosts[hostname] = _inventory_host_vars(resource, await _resource_ip(resource))
