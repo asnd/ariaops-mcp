@@ -71,12 +71,12 @@ def _unique_hostname(base_hostname: str, identifier: str, seen_hostnames: set[st
         if candidate not in seen_hostnames:
             return candidate
 
-    suffix = 2
-    while True:
+    for suffix in range(2, 10_001):
         candidate = f"{base_hostname}_{suffix}"
         if candidate not in seen_hostnames:
             return candidate
-        suffix += 1
+
+    raise ValueError(f"Unable to derive a unique hostname for resource '{base_hostname}'")
 
 
 def _resource_name(resource: dict[str, Any]) -> str:
