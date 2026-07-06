@@ -60,7 +60,7 @@ Write/mutating tools are exposed only when `ARIAOPS_ENABLE_WRITE_OPERATIONS=true
 
 ---
 
-## Write Tools (17 tools — requires `ARIAOPS_ENABLE_WRITE_OPERATIONS=true`)
+## Write Tools (18 tools — requires `ARIAOPS_ENABLE_WRITE_OPERATIONS=true`)
 
 ### Alert Write Operations (4 tools)
 
@@ -94,10 +94,38 @@ Write/mutating tools are exposed only when `ARIAOPS_ENABLE_WRITE_OPERATIONS=true
 - `update_resource` - Update an existing resource's metadata.
 - `delete_resources` - Delete one or more resources by ID (irreversible).
 
+### Inventory Export (1 tool)
+
+- `export_ansible_inventory` - Export an Ansible-compatible YAML inventory for vSphere clusters, NSX-T edge nodes, and NSX-T managers. Optional input: `outputPath` to also write the YAML to disk. Output format:
+
+  ```yaml
+  all:
+    children:
+      clusters:
+        hosts:
+          Prod_Cluster:
+            ansible_host: 10.0.0.10
+            ariaops_identifier: cluster-1
+            ariaops_identity:
+              moid: domain-c101
+      nsx_edges:
+        hosts: {}
+      nsx_managers:
+        hosts: {}
+  ```
+
+  Example input:
+
+  ```json
+  {
+    "outputPath": "/tmp/ariaops-inventory.yml"
+  }
+  ```
+
 ---
 
 ## Total
 
 - **37 read-only tools** (always active)
-- **17 write tools** (active when `ARIAOPS_ENABLE_WRITE_OPERATIONS=true`)
-- **54 tools total**
+- **18 write tools** (active when `ARIAOPS_ENABLE_WRITE_OPERATIONS=true`)
+- **55 tools total**

@@ -20,14 +20,15 @@ from ariaops_mcp.principal import AccessDenied, Principal, resolve_principal
 from ariaops_mcp.skills.executor import execute_skill as _run_skill_orchestration
 from ariaops_mcp.skills.prompts import render_prompt, skill_to_prompt
 from ariaops_mcp.skills.registry import get_registry
-from ariaops_mcp.tools import alerts, capacity, discovery, metrics, reports, resources, write_ops
+from ariaops_mcp.tools import alerts, ansible_inventory, capacity, discovery, metrics, reports, resources, write_ops
 
 logger = logging.getLogger(__name__)
 
 READ_ONLY_MODULES = [resources, alerts, metrics, capacity, reports, discovery]
+WRITE_MODULES = [write_ops, ansible_inventory]
 
 # Write-operation tool names (always known, independent of whether they're enabled).
-_WRITE_TOOL_NAMES: set[str] = {t.name for t in write_ops.tool_definitions()}
+_WRITE_TOOL_NAMES: set[str] = {t.name for mod in WRITE_MODULES for t in mod.tool_definitions()}
 
 # Meta-tools that operate on the server itself and are not bound to a single
 # Aria Operations instance.
@@ -82,8 +83,9 @@ def _get_tool_registry() -> tuple[list[types.Tool], dict[str, Callable[..., Awai
             defs.extend(mod.tool_definitions())
             handlers.update(mod.tool_handlers())
         if _write_operations_enabled():
-            defs.extend(write_ops.tool_definitions())
-            handlers.update(write_ops.tool_handlers())
+            for mod in WRITE_MODULES:
+                defs.extend(mod.tool_definitions())
+                handlers.update(mod.tool_handlers())
         _tool_defs = defs
         _tool_handlers = handlers
     return _tool_defs, _tool_handlers
