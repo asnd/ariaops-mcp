@@ -72,6 +72,17 @@ def _resolve_role(value: Any, settings: Settings) -> str | None:
     return None
 
 
+def _stringify_role(value: Any) -> str:
+    """Render an unmapped role claim for an error message.
+
+    A list/tuple/set claim (e.g. ``["contractor"]``) is joined into a plain
+    comma-separated string instead of Python's ``str(["contractor"])`` repr.
+    """
+    if isinstance(value, (list, tuple, set)):
+        return ", ".join(str(item) for item in value)
+    return str(value)
+
+
 def _instance_for_country(country: str, settings: Settings) -> str:
     matches = [
         inst.id
@@ -113,7 +124,7 @@ def resolve_principal(
             # A role was asserted: map it strictly so an unrecognized role is
             # denied rather than silently inheriting the (often broader) default.
             mapped = _resolve_role(raw_role, settings)
-            role = mapped if mapped is not None else str(raw_role)
+            role = mapped if mapped is not None else _stringify_role(raw_role)
         country = claims.get(settings.country_claim) or settings.default_country
         explicit_instance = claims.get(settings.instance_claim)
 

@@ -334,8 +334,11 @@ async def test_get_capacity_overview_chunks_stats_query(handlers):
     assert len(stats_bodies[0]["resourceId"]) == PAGE_SIZE_MAX
     assert len(stats_bodies[1]["resourceId"]) == 250 - PAGE_SIZE_MAX
     assert data["resourceCount"] == 250
-    # Chunked responses are merged back into a single values list.
-    assert len(data["capacityStats"]["values"]) == 250
+    # All chunks are fetched and merged, but the response sent back to the
+    # caller is capped at MAX_LIST_ITEMS to avoid an unbounded LLM payload.
+    assert len(data["capacityStats"]["values"]) == MAX_LIST_ITEMS
+    assert data["capacityStats"]["_truncated"] is True
+    assert data["capacityStats"]["_truncatedAt"] == MAX_LIST_ITEMS
 
 
 @pytest.mark.asyncio

@@ -87,3 +87,17 @@ jobs:
 
       - name: Run pyright
         run: uv run pyright src/
+
+  oauth-e2e:
+    name: OAuth and role-routing integration (Podman)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+      - name: Install test dependencies
+        run: uv sync --extra dev --frozen --python 3.11
+      - name: Run isolated OAuth scenario
+        run: bash test-e2e/oauth/run.sh
+      - name: Clean up scenario
+        if: always()
+        run: bash test-e2e/oauth/run.sh down

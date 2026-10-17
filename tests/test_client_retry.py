@@ -37,7 +37,8 @@ async def test_get_retries_on_transient_error_then_succeeds(mock_env, monkeypatc
 
         assert result["releaseName"] == "8.18.0"
         assert version_route.call_count == 2
-        assert sleep_calls == [_BASE_BACKOFF_SECS]
+        assert len(sleep_calls) == 1
+        assert _BASE_BACKOFF_SECS / 2 <= sleep_calls[0] <= _BASE_BACKOFF_SECS
         await client.close()
 
 
@@ -145,12 +146,14 @@ async def test_idempotent_post_can_retry_on_transient_failure(mock_env, monkeypa
 
         assert result == {"resourceList": []}
         assert query_route.call_count == 2
-        assert sleep_calls == [_BASE_BACKOFF_SECS]
+        assert len(sleep_calls) == 1
+        assert _BASE_BACKOFF_SECS / 2 <= sleep_calls[0] <= _BASE_BACKOFF_SECS
         await client.close()
 
 
 @pytest.mark.asyncio
 async def test_retry_stops_when_deadline_budget_cannot_cover_backoff(mock_env, monkeypatch):
+    monkeypatch.setattr("ariaops_mcp.client.random.uniform", lambda low, high: high)
     with respx.mock:
         respx.post(f"{BASE}/auth/token/acquire").mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
         version_route = respx.get(f"{BASE}/versions/current").mock(

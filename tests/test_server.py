@@ -266,6 +266,37 @@ async def test_call_reload_skills(mock_env, monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_call_reload_skills_denies_non_ops_role(mock_env, monkeypatch, tmp_path):
+    """A country-role principal must not be able to trigger a skills reload."""
+    from ariaops_mcp.config import clear_settings_cache
+
+    skill_content = "---\nname: one\ndescription: One\n---\n\nBody"
+    (tmp_path / "one.md").write_text(skill_content)
+    monkeypatch.setenv(SKILL_DIR_VAR, str(tmp_path))
+    monkeypatch.setenv("ARIAOPS_DEFAULT_ROLE", "country")
+    monkeypatch.setenv("ARIAOPS_DEFAULT_COUNTRY", "US")
+    clear_settings_cache()
+
+    server = create_server()
+    result = await server.request_handlers[CallToolRequest](
+        CallToolRequest(
+            method="tools/call", params={"name": "reload_skills", "arguments": {}}
+        )
+    )
+    data = json.loads(result.root.content[0].text)
+    assert data["error"] == "Access denied"
+    assert "reload_skills" in data["detail"]
+
+    # list_skills, in contrast, stays open to any authenticated principal.
+    list_result = await server.request_handlers[CallToolRequest](
+        CallToolRequest(method="tools/call", params={"name": "list_skills", "arguments": {}})
+    )
+    list_data = json.loads(list_result.root.content[0].text)
+    assert isinstance(list_data, list)
+    assert list_data[0]["name"] == "one"
+
+
+@pytest.mark.asyncio
 async def test_list_prompts(mock_env, monkeypatch, tmp_path):
     """List prompts should return skills as MCP prompts."""
     skill_content = (
