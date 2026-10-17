@@ -69,18 +69,30 @@ def map_groups_to_claims(
          "vrops-se":  {"role": "country", "country": "SE"},
          "vrops-de":  {"role": "country", "instance": "de"}}
 
+    A bare-CN key (no ``=`` in it) matches any group with that CN anywhere in
+    the directory. A full-DN key is more specific and only matches that exact
+    DN — it is deliberately *not* also indexed by CN, so an admin who
+    disambiguates two same-named groups in different OUs by using the full DN
+    cannot be bypassed by membership in the wrong OU's group.
+
     Resolution: an ``ops`` mapping always wins (broadest access); otherwise the
     first matching ``country`` mapping is used. Returns ``None`` when no group
     matches, so the caller can deny an authenticated-but-unmapped user.
     """
     cn_map: dict[str, dict[str, str]] = {
-        _extract_cn(key).lower(): descriptor for key, descriptor in group_role_map.items()
+        _extract_cn(key).lower(): descriptor
+        for key, descriptor in group_role_map.items()
+        if _extract_cn(key) == key  # bare CN, not a full DN
+    }
+    dn_map: dict[str, dict[str, str]] = {
+        key.lower(): descriptor for key, descriptor in group_role_map.items() if _extract_cn(key) != key
     }
 
     matched: list[dict[str, str]] = []
     for group_dn in groups:
-        if group_dn in group_role_map:
-            matched.append(group_role_map[group_dn])
+        descriptor = dn_map.get(group_dn.lower())
+        if descriptor is not None:
+            matched.append(descriptor)
             continue
         descriptor = cn_map.get(_extract_cn(group_dn).lower())
         if descriptor is not None:
@@ -116,7 +128,12 @@ class LDAPAuthenticator:
     Binds with the user's own credentials (no service account), reads
     ``memberOf`` to derive principal claims, and caches the result for
     ``cache_ttl`` seconds. Failed binds are never cached so that a password
-    change takes effect immediately.
+    change is rejected immediately; however a *successful* bind's claims stay
+    cached under the old credential pair for up to ``cache_ttl`` seconds, so
+    the old password keeps working from cache for that window after a change.
+    Lower ``cache_ttl`` to shrink this window. No bind-attempt rate limiting
+    is implemented here — brute-force protection relies on the directory's
+    own account lockout policy.
     """
 
     def __init__(
@@ -314,6 +331,11 @@ class LDAPAuthenticator:
         belongs to no mapped group. Results are cached for ``cache_ttl`` seconds;
         failures are not cached.
         """
+        if not username or not password:
+            # An empty password would attempt an unauthenticated/anonymous LDAP
+            # bind (RFC 4513 §5.1.2), which some directories accept as "success".
+            return None
+
         key = self._cache_key(username, password)
         cached = self._check_cache(key)
         if cached is not None:

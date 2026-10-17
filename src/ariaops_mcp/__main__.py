@@ -18,28 +18,31 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from ariaops_mcp.client import close_all, get_client
-from ariaops_mcp.config import Settings, get_settings
+from ariaops_mcp.config import InstanceConfig, Settings, get_settings
 from ariaops_mcp.http_auth import JWTTokenVerifier
 from ariaops_mcp.logging_config import configure_logging
 from ariaops_mcp.server import create_server
 
 
+async def _probe_instance(inst: InstanceConfig) -> dict[str, Any]:
+    client = get_client(inst.id)
+    entry: dict[str, Any] = {"id": inst.id, "circuit_breaker": client.circuit_breaker.state.value}
+    try:
+        await client.get("/versions/current")
+        entry["status"] = "ok"
+    except Exception as e:
+        entry["status"] = "degraded"
+        entry["detail"] = str(e)
+    return entry
+
+
 async def _health_check(_request: Request) -> JSONResponse:
     settings = get_settings()
     instances = settings.resolved_instances()
-    results: list[dict[str, Any]] = []
-    overall_ok = True
-    for inst in instances:
-        client = get_client(inst.id)
-        entry: dict[str, Any] = {"id": inst.id, "circuit_breaker": client.circuit_breaker.state.value}
-        try:
-            await client.get("/versions/current")
-            entry["status"] = "ok"
-        except Exception as e:
-            entry["status"] = "degraded"
-            entry["detail"] = str(e)
-            overall_ok = False
-        results.append(entry)
+    # Probe every instance concurrently so N degraded backends cost one
+    # read-timeout, not N of them, keeping this within probe-tool deadlines.
+    results = await asyncio.gather(*(_probe_instance(inst) for inst in instances))
+    overall_ok = all(entry["status"] == "ok" for entry in results)
 
     payload: dict[str, Any] = {"status": "ok" if overall_ok else "degraded", "instances": results}
     # Preserve the legacy single-instance shape for existing probes.

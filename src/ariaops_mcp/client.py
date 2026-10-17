@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from contextvars import ContextVar, Token
 from typing import Any
@@ -26,6 +27,12 @@ _HTTP_CONNECT_TIMEOUT_SECS = 30.0
 _HTTP_READ_TIMEOUT_SECS = 60.0
 _HTTP_WRITE_TIMEOUT_SECS = 30.0
 _HTTP_POOL_TIMEOUT_SECS = 30.0
+
+
+def _backoff_secs(attempt: int) -> float:
+    """Equal-jitter exponential backoff to avoid synchronized retry storms."""
+    base = _BASE_BACKOFF_SECS * (2**attempt)
+    return base / 2 + random.uniform(0, base / 2)
 
 
 class AriaOpsClient:
@@ -172,7 +179,7 @@ class AriaOpsClient:
                 if attempt == _MAX_ATTEMPTS - 1:
                     resp.raise_for_status()
 
-                backoff_secs = _BASE_BACKOFF_SECS * (2**attempt)
+                backoff_secs = _backoff_secs(attempt)
                 logger.warning(
                     "%s %s returned %s, retrying in %.1fs (%s/%s)",
                     method,
@@ -192,7 +199,7 @@ class AriaOpsClient:
                     and exc.response.status_code in _RETRYABLE_STATUS_CODES
                     and attempt < _MAX_ATTEMPTS - 1
                 ):
-                    backoff_secs = _BASE_BACKOFF_SECS * (2**attempt)
+                    backoff_secs = _backoff_secs(attempt)
                     logger.warning(
                         "%s %s failed with %s, retrying in %.1fs (%s/%s)",
                         method,
@@ -211,7 +218,7 @@ class AriaOpsClient:
             except httpx.HTTPError as exc:
                 last_exc = exc
                 if can_retry and attempt < _MAX_ATTEMPTS - 1:
-                    backoff_secs = _BASE_BACKOFF_SECS * (2**attempt)
+                    backoff_secs = _backoff_secs(attempt)
                     logger.warning(
                         "%s %s request error: %s, retrying in %.1fs (%s/%s)",
                         method,

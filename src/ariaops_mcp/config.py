@@ -400,6 +400,19 @@ class Settings(BaseSettings):
             raise ValueError("ARIAOPS_LDAP_CACHE_TTL must be >= 0")
         if self.ldap_bind_timeout <= 0:
             raise ValueError("ARIAOPS_LDAP_BIND_TIMEOUT must be > 0")
+
+        # Fail closed: without a group map every successfully-bound directory
+        # user is granted default_role. "ops" is default_role's own default,
+        # which would silently grant every employee access to every instance —
+        # require the operator to make that choice explicitly.
+        if not self.ldap_group_role_map and "default_role" not in self.model_fields_set:
+            raise ValueError(
+                "ARIAOPS_HTTP_AUTH_MODE=ldap with no ARIAOPS_LDAP_GROUP_ROLE_MAP requires "
+                "ARIAOPS_DEFAULT_ROLE to be set explicitly — every authenticated user is "
+                "granted this role. Set it to 'country' (with ARIAOPS_DEFAULT_COUNTRY/"
+                "ARIAOPS_DEFAULT_INSTANCE) for a restricted default, or 'ops' to confirm "
+                "that broad access is intentional."
+            )
         if self.http_oauth_required_scopes:
             logger.warning(
                 "ARIAOPS_HTTP_OAUTH_REQUIRED_SCOPES is set but ignored in LDAP mode: "

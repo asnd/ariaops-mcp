@@ -11,15 +11,21 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
-NETWORK=ariaops-e2e
+NETWORK=${E2E_NETWORK:-ariaops-e2e}
+KC_NAME=${E2E_KC_NAME:-keycloak}
+MCP_NAME=${E2E_MCP_NAME:-ariaops-mcp-e2e}
 KC_IMAGE=quay.io/keycloak/keycloak:23.0
+exec 3>&2
+progress() {
+    if [ -t 3 ]; then printf '[%s/5] %s\n' "$1" "$2" >&3; fi
+}
 
 curl_noproxy() {
     curl --noproxy '*' "$@"
 }
 
 down() {
-    podman rm -f keycloak ariaops-mcp-e2e 2>/dev/null || true
+    podman rm -f "$KC_NAME" "$MCP_NAME" 2>/dev/null || true
     podman network rm "$NETWORK" 2>/dev/null || true
     echo "Stack removed."
 }
@@ -30,14 +36,16 @@ if [[ "${1:-}" == "down" ]]; then
 fi
 
 echo "==> Building ariaops-mcp image"
+progress 1 'Build image'
 podman build --format docker -t ariaops-mcp:latest -f "$REPO_ROOT/Containerfile" "$REPO_ROOT" >/dev/null
 echo "    built"
 
 echo "==> (Re)creating network and containers"
+progress 2 'Start isolated stack'
 down >/dev/null 2>&1 || true
 podman network create "$NETWORK" >/dev/null
 
-podman run -d --name keycloak --network "$NETWORK" \
+podman run -d --name "$KC_NAME" --network "$NETWORK" --network-alias keycloak \
     -p 8081:8080 \
     -e KEYCLOAK_ADMIN=admin -e KEYCLOAK_ADMIN_PASSWORD=admin \
     -e no_proxy='*' -e NO_PROXY='*' \
@@ -46,6 +54,7 @@ podman run -d --name keycloak --network "$NETWORK" \
 echo "    keycloak starting on http://localhost:8081 (admin/admin)"
 
 echo "==> Waiting for Keycloak realm import (can take ~60s on first pull)"
+progress 3 'Wait for Keycloak'
 for i in $(seq 1 60); do
     if curl_noproxy -sf "http://localhost:8081/realms/ariaops/.well-known/openid-configuration" >/dev/null 2>&1; then
         echo "    realm 'ariaops' is up"
@@ -53,19 +62,20 @@ for i in $(seq 1 60); do
     fi
     if [[ $i == 60 ]]; then
         echo "    Keycloak did not come up; logs:"
-        podman logs --tail 30 keycloak
+        podman logs --tail 30 "$KC_NAME"
         exit 1
     fi
     sleep 2
 done
 
-podman run -d --name ariaops-mcp-e2e --network "$NETWORK" \
+podman run -d --name "$MCP_NAME" --network "$NETWORK" \
     -p 8090:8080 \
     --env-file "$HERE/mcp.env" \
     ariaops-mcp:latest >/dev/null
 echo "    ariaops-mcp starting on http://localhost:8090"
 
 echo "==> Waiting for MCP server"
+progress 4 'Wait for MCP server'
 for i in $(seq 1 30); do
     # 401 means the OAuth gate is up and answering — that's "ready" here.
     code=$(curl_noproxy -s -o /dev/null -w '%{http_code}' -X POST "http://localhost:8090/" || true)
@@ -75,16 +85,17 @@ for i in $(seq 1 30); do
     fi
     if [[ $i == 30 ]]; then
         echo "    MCP server did not come up; logs:"
-        podman logs --tail 30 ariaops-mcp-e2e
+        podman logs --tail 30 "$MCP_NAME"
         exit 1
     fi
     sleep 1
 done
 
 echo "==> Running e2e tests"
+progress 5 'Run OAuth and role-routing tests'
 cd "$REPO_ROOT"
 env no_proxy="localhost,127.0.0.1" NO_PROXY="localhost,127.0.0.1" \
-    .venv/bin/python "$HERE/e2e_oauth.py"
+    uv run --extra dev python "$HERE/e2e_oauth.py"
 status=$?
 
 echo

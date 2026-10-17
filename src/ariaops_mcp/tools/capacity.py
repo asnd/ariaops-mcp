@@ -12,9 +12,14 @@ import httpx
 import mcp.types as types
 
 from ariaops_mcp.client import get_client
-from ariaops_mcp.tools._common import PAGE_SIZE_MAX, format_error
+from ariaops_mcp.tools._common import PAGE_SIZE_MAX, format_error, truncate_list_response
 
 logger = logging.getLogger(__name__)
+
+# Chunk size for /resources/stats/latest/query POST bodies, so large deployments
+# don't produce one oversized request/response. Reuses PAGE_SIZE_MAX's value
+# but is named separately since it bounds a POST body, not a GET page.
+STATS_QUERY_CHUNK_SIZE = PAGE_SIZE_MAX
 
 # Capacity-related stat keys in Aria Operations
 CAPACITY_STAT_KEYS = [
@@ -184,8 +189,8 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
             # Query stats in chunks so large deployments don't produce one
             # oversized POST body / response.
             stats_values: list[Any] = []
-            for i in range(0, len(all_resource_ids), PAGE_SIZE_MAX):
-                chunk = all_resource_ids[i : i + PAGE_SIZE_MAX]
+            for i in range(0, len(all_resource_ids), STATS_QUERY_CHUNK_SIZE):
+                chunk = all_resource_ids[i : i + STATS_QUERY_CHUNK_SIZE]
                 body = {
                     "resourceId": [{"resourceId": rid} for rid in chunk],
                     "statKey": [{"key": k} for k in CAPACITY_STAT_KEYS],
@@ -197,7 +202,7 @@ def tool_handlers() -> dict[str, Callable[[dict[str, Any]], Any]]:
                 {
                     "resourceKind": resource_kind,
                     "resourceCount": len(all_resource_ids),
-                    "capacityStats": {"values": stats_values},
+                    "capacityStats": truncate_list_response({"values": stats_values}, "values"),
                 },
                 indent=2,
             )

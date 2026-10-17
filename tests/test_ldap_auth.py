@@ -175,6 +175,24 @@ def test_map_empty_groups_returns_none():
     assert map_groups_to_claims([], {"vrops-ops": {"role": "ops"}}, **_MAP_KWARGS) is None
 
 
+def test_map_full_dn_key_does_not_match_same_cn_in_other_ou():
+    """A full-DN map key is more specific than a bare CN and must not be
+    matched via CN fallback by a same-named group in a different OU."""
+    scope_map = {"CN=vrops-ops,OU=Privileged,DC=corp,DC=com": {"role": "ops"}}
+    claims = map_groups_to_claims(
+        ["CN=vrops-ops,OU=SelfService,DC=corp,DC=com"], scope_map, **_MAP_KWARGS
+    )
+    assert claims is None
+
+
+def test_map_full_dn_key_matches_exact_dn_case_insensitive():
+    scope_map = {"CN=vrops-ops,OU=Privileged,DC=corp,DC=com": {"role": "ops"}}
+    claims = map_groups_to_claims(
+        ["cn=vrops-ops,ou=privileged,dc=corp,dc=com"], scope_map, **_MAP_KWARGS
+    )
+    assert claims == {ROLE_CLAIM: "ops"}
+
+
 # ── LDAPAuthenticator ─────────────────────────────────────────────────────────
 
 
@@ -200,6 +218,18 @@ async def test_authenticator_mapped_country_group():
 async def test_authenticator_failed_bind_returns_none():
     auth = _make_authenticator(bind_succeeds=False)
     assert await auth.authenticate("alice", "wrong") is None
+
+
+@pytest.mark.asyncio
+async def test_authenticator_rejects_empty_password_without_binding():
+    auth = _make_authenticator(bind_succeeds=True, groups=["CN=whatever,DC=corp,DC=com"])
+    assert await auth.authenticate("alice", "") is None
+
+
+@pytest.mark.asyncio
+async def test_authenticator_rejects_empty_username_without_binding():
+    auth = _make_authenticator(bind_succeeds=True, groups=["CN=whatever,DC=corp,DC=com"])
+    assert await auth.authenticate("", "secret") is None
 
 
 @pytest.mark.asyncio
@@ -501,6 +531,10 @@ def _build_ldap_settings(**extra: Any) -> Settings:
             "ARIAOPS_LDAP_USER_DN_TEMPLATE": "{username}@corp.example.com",
             "ARIAOPS_LDAP_USER_SEARCH_BASE": "dc=corp,dc=example,dc=com",
             "ARIAOPS_LDAP_VERIFY_TLS": False,
+            # A group map (or an explicit default role) is required in LDAP mode
+            # so that config validation fails closed by default; tests that care
+            # about the group map override it via **extra.
+            "ARIAOPS_LDAP_GROUP_ROLE_MAP": '{"vrops-ops": {"role": "ops"}}',
             **extra,
         }
     )
@@ -668,6 +702,38 @@ def test_config_effective_auth_mode_backward_compat():
         }
     )
     assert settings.effective_auth_mode == "oauth"
+
+
+def test_config_ldap_requires_default_role_when_group_map_empty():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="ARIAOPS_DEFAULT_ROLE"):
+        Settings.model_validate(
+            {
+                **_BASE,
+                "ARIAOPS_HTTP_AUTH_MODE": "ldap",
+                "ARIAOPS_LDAP_SERVER_URI": "ldaps://dc.corp.example.com:636",
+                "ARIAOPS_LDAP_USER_DN_TEMPLATE": "{username}@corp.example.com",
+                "ARIAOPS_LDAP_USER_SEARCH_BASE": "dc=corp,dc=example,dc=com",
+                "ARIAOPS_LDAP_VERIFY_TLS": False,
+                # No ARIAOPS_LDAP_GROUP_ROLE_MAP and no explicit ARIAOPS_DEFAULT_ROLE.
+            }
+        )
+
+
+def test_config_ldap_allows_empty_group_map_with_explicit_default_role():
+    settings = Settings.model_validate(
+        {
+            **_BASE,
+            "ARIAOPS_HTTP_AUTH_MODE": "ldap",
+            "ARIAOPS_LDAP_SERVER_URI": "ldaps://dc.corp.example.com:636",
+            "ARIAOPS_LDAP_USER_DN_TEMPLATE": "{username}@corp.example.com",
+            "ARIAOPS_LDAP_USER_SEARCH_BASE": "dc=corp,dc=example,dc=com",
+            "ARIAOPS_LDAP_VERIFY_TLS": False,
+            "ARIAOPS_DEFAULT_ROLE": "ops",
+        }
+    )
+    assert settings.default_role == "ops"
 
 
 def test_config_group_map_invalid_json_friendly_error():
